@@ -115,9 +115,6 @@
   }
   .nogl { position: fixed; inset: 0; display: grid; place-items: center; color: var(--ink-dim); }
 </style>
-<script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js" } }
-</script>
 </head>
 <body>
 <canvas id="pond" aria-label="A pond of koi drawn in text characters, with projects floating on the water. Use the numbered project buttons to open them."></canvas>
@@ -134,8 +131,25 @@
 <div id="tag" class="tag" hidden></div>
 <aside id="panel" class="panel" role="dialog" aria-label="Project" hidden><pre id="panel-text"></pre></aside>
 
+<script>
+  // If something goes wrong, say so on the page instead of leaving it blank.
+  (function () {
+    var shown = false;
+    window.pondFail = function (msg) {
+      if (shown) return; shown = true;
+      var d = document.createElement("div"); d.className = "nogl"; d.style.zIndex = 9; d.style.padding = "24px"; d.style.textAlign = "center";
+      d.textContent = msg; document.body.appendChild(d);
+    };
+    window.addEventListener("error", function (e) { window.pondFail("The pond hit an error: " + (e.message || e.type) + ". Reload to try again."); });
+    window.addEventListener("unhandledrejection", function (e) { window.pondFail("The pond hit an error: " + (e.reason && e.reason.message || e.reason) + ". Reload to try again."); });
+    setTimeout(function () {
+      if (!window.pondStarted) window.pondFail("The pond could not load three.js from cdn.jsdelivr.net. An ad blocker, VPN or network filter may be blocking it; reload to try again.");
+    }, 12000);
+  })();
+</script>
 <script type="module">
-import * as THREE from "three";
+// Imported by full URL (no import map), so it works wherever the page is hosted.
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js";
 
 /* ===================================================================
  *  EDIT ME. Your name, and the projects that float on the pond.
@@ -475,18 +489,29 @@ float flowAt(vec2 w){ ivec2 n = textureSize(uHeightMap, 0); return texelFetch(uH
 // Where along three samples (-1, 0, +1) a parabola through them turns; k > 0 is a furrow, k < 0 a crest.
 float vertexAt(float a, float b, float c, out float k){ k = a - 2.0*b + c; return abs(k) > 0.003 ? (a - c) / (2.0*k) : 9.0; }
 // Four samples per cell. Starlings (alpha ~0.55) are counted apart from solid things.
-vec4 shadeAt(vec2 c, bool dryOnly, out float cover, out float bird, out float birdR){
-  vec4 acc = vec4(0.0); vec4 best = vec4(0.0, 0.0, 2.0, 0.0); cover = 0.0; bird = 0.0; birdR = 0.5;
+vec4 shadeAt(vec2 c, bool dryOnly, out float cover, out float bird, out float birdR, out float birdC){
+  vec4 acc = vec4(0.0); vec4 best = vec4(0.0, 0.0, 2.0, 0.0); cover = 0.0; bird = 0.0; birdR = 0.5; birdC = 0.5;
   for (int k = 0; k < 4; k++) {
     vec2 o = vec2((k == 1 || k == 3) ? 0.75 : 0.25, k >= 2 ? 0.75 : 0.25);
     vec4 s = texture2D(uShade, (c + o) / uGrid);
     if (s.a > 0.5 && !(dryOnly && s.b > 0.004)) {          // dryOnly: skip anything below the surface
-      if (s.a < 0.58) { bird += 0.25; birdR = s.r; }
+      if (s.a < 0.58) { bird += 0.25; birdR = s.r; birdC = s.g; }
       else { cover += 0.25; acc += s; if (s.b <= best.b) best = s; }
     }
   }
   if (cover > 0.0) { acc /= cover * 4.0; acc.g = best.g; }
   return acc;
+}
+// A starling's colour from its code (see BIRD_FRAG) and light.
+vec3 birdColor(float c, float l){
+  if (c < 0.15) return vec3(0.98, 0.78, 0.18) * (0.75 + 0.35*l);                 // bill
+  if (c < 0.25) return vec3(0.05);                                              // eye
+  if (c < 0.31) return vec3(0.95, 0.89, 0.72) * (0.8 + 0.25*l);                  // pale spots
+  if (c < 0.34) return vec3(0.62, 0.5, 0.33) * (0.7 + 0.4*l);                     // buff feather edges
+  if (c > 0.96) return mix(vec3(0.07, 0.065, 0.06), vec3(0.32, 0.28, 0.22), pow(l, 2.0) * 0.7);   // flight feathers: dull, buff-edged
+  float t = (c - 0.35) / 0.65;
+  vec3 sheen = mix(vec3(0.58, 0.3, 0.78), vec3(0.22, 0.66, 0.44), smoothstep(0.15, 0.6, t));
+  return mix(vec3(0.07, 0.07, 0.09), sheen, pow(l, 1.4) * 0.9);                // glossy black, oil-slick where lit
 }
 float birdGlyph(float r){ return r > 0.66 ? ${ATLAS.length + 118 - 32}.0 : (r > 0.33 ? ${ATLAS.length + 45 - 32}.0 : ${ATLAS.length + 94 - 32}.0); }
 float lineGlyph(vec2 g){
@@ -505,7 +530,7 @@ void main(){
   vec2 wc = floor(wp * uZoom / uCellCss);               // a character cell, pinned to the world
   float side = wy - shoreY(wx);                          // < 0 water, > 0 land (the garden is north)
   bool land = side > -18.0;
-  vec3 col = vec3(0.0); float glyph = 0.0; float shadow = 0.0;
+  vec3 col = vec3(0.0); float glyph = 0.0; float shadow = 0.0; bool overBird = false;
   float hs = hash2(wc);
 
   if (!land) {
@@ -535,9 +560,9 @@ void main(){
       glow += g.w * exp(-dot(d, d) / (g.z*g.z));
     }
     vec3 warm = vec3(1.0, 0.72, 0.42);
-    float cover, bird, bR; vec4 s = shadeAt(cBL + dc, false, cover, bird, bR);
+    float cover, bird, bR, bC; vec4 s = shadeAt(cBL + dc, false, cover, bird, bR, bC);
     if (bird > 0.0 && cover < 0.75) {
-      glyph = birdGlyph(bR); col = vec3(0.78, 0.88, 0.9);
+      glyph = clamp(floor(bird * ${RAMP_TOP}.0 * (0.6 + 0.4 * bR) + 0.5), 2.0, ${RAMP_TOP}.0); overBird = true; col = birdColor(bC, bR);
     } else if (cover > 0.0) {
       float cls = floor(s.g*31.0 + 0.5);
       float light = s.r * mix(0.55, 1.0, cover);
@@ -547,7 +572,7 @@ void main(){
       col += vec3(0.22) * max(lit - 0.45, 0.0);
       col = mix(col, col * vec3(1.3, 1.02, 0.75), clamp(glow, 0.0, 1.0) * 0.7);
     } else {
-      float sc, sb, sr; shadeAt(cBL + dc + uShadow, false, sc, sb, sr);
+      float sc, sb, sr, sbc; shadeAt(cBL + dc + uShadow, false, sc, sb, sr, sbc);
       shadow = sc;                                       // solid things only; the starlings cast none
       float v = fbm3(vec3((wp - uDrift*uTime)*0.0032, uTime*0.05));
       float f = fract(v*7.0);
@@ -607,10 +632,10 @@ void main(){
     }
   } else {
     /* ---------- the garden ---------- */
-    float cover, bird, bR; vec4 s = shadeAt(cBL, true, cover, bird, bR);
+    float cover, bird, bR, bC; vec4 s = shadeAt(cBL, true, cover, bird, bR, bC);
     vec3 lo = vec3(0.50, 0.43, 0.34), mid = vec3(0.70, 0.64, 0.55);
     if (bird > 0.0 && cover < 0.75) {
-      glyph = birdGlyph(bR); col = vec3(0.12, 0.11, 0.13);
+      glyph = clamp(floor(bird * ${RAMP_TOP}.0 * (0.6 + 0.4 * bR) + 0.5), 2.0, ${RAMP_TOP}.0); overBird = true; col = birdColor(bC, bR);
     } else if (cover > 0.0) {
       float cls = floor(s.g*31.0 + 0.5);
       float light = s.r * mix(0.6, 1.0, cover);
@@ -674,7 +699,7 @@ void main(){
         float n2 = hash2(wc * 1.7 + 3.1);
         if (n2 > 0.55) { glyph = n2 > 0.85 ? ${ATLAS.length + 44 - 32}.0 : ${ATLAS.length + 46 - 32}.0; col = mix(mid, lo, 0.5); }
       }
-      float sc, sb, sr; shadeAt(cBL + uShadowRock, true, sc, sb, sr);
+      float sc, sb, sr, sbc; shadeAt(cBL + uShadowRock, true, sc, sb, sr, sbc);
       shadow = sc;
       col *= 1.0 - shadow*0.3;
     }
@@ -685,7 +710,7 @@ void main(){
   }
   vec4 tx = texelFetch(uText, ivec2(cBL), 0);           // project titles written into the grid
   float tgl = floor(tx.r*255.0 + 0.5);
-  if (tgl > 0.5) {
+  if (tgl > 0.5 && !overBird) {            // birds fly over the writing
     float st = floor(tx.g*255.0 + 0.5);
     glyph = tgl; shadow = 0.0;
     col = land ? (st > 2.5 ? vec3(0.75, 0.28, 0.1) : (st > 1.5 ? vec3(0.48, 0.42, 0.35) : vec3(0.22, 0.19, 0.15)))
@@ -843,6 +868,11 @@ try {
   throw e;
 }
 renderer.setClearColor(0x000000, 0);
+renderer.debug.onShaderError = (gl, program, vs, fs) => {
+  const log = (gl.getShaderInfoLog(vs) || "") + (gl.getShaderInfoLog(fs) || "") + (gl.getProgramInfoLog(program) || "");
+  console.error("Shader error:", log);
+  window.pondFail?.("A shader failed to compile on this graphics card: " + log.trim().split("\n")[0]);
+};
 renderer.autoClear = false;
 
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2221,35 +2251,141 @@ function vnoise3(x, y, z) {
 const C_ROCK = 24, C_MOSS = 25, C_MOSS2 = 26, C_DECK = 27, C_SEAM = 28, C_STONE = 29, C_LIGHT = 30, C_PEBBLE = 31, C_RAKE = 19;
 
 const BIRD_VERT = /* glsl */`
+// A starling built from a flexible body and two jointed wings.
+//  - Wings: shoulder, wrist and hand joints, each lagging the one before, so a
+//    beat travels out to the tips. On the upstroke the hand folds back and in,
+//    as real birds do; on the downstroke the wing spreads and reaches forward.
+//    On the ground the wings fold back along the body (tuck).
+//  - Body: bends into turns, the tail fans when turning hard, the head turns on
+//    its own (looking about, or leading a turn) and dips forward to peck.
+// aAnim = (beat phase, beat amplitude, bank, bend); aPose = (tuck, peck, head turn).
+// aWing = 0 on the body, otherwise how far out along the wing (0..1).
 attribute float aWing;
-#ifdef USE_INSTANCING
-attribute float aPhase;
-#else
-uniform float aPhase;
-#endif
-uniform float uTime; uniform float uFlapRate;
-varying float vFlap;
+attribute float aTone;
+attribute float aPart;
+attribute vec2 aUV;
+attribute vec4 aAnim;
+attribute vec3 aPose;
+varying float vLight;
+varying float vPart;
+varying vec2 vUV;
+varying vec3 vPos;
+const vec3 LIGHT = vec3(-0.45, -0.55, 0.70);
+vec2 rot(vec2 v, float a){ float c = cos(a), s = sin(a); return vec2(v.x*c - v.y*s, v.x*s + v.y*c); }
 void main(){
-  float ph = aPhase;
-  float flap = sin(uTime * uFlapRate * (0.8 + 0.4*fract(ph*7.31)) + ph*6.2831);
   vec3 p = position;
-  p.z += aWing * flap * 0.8;
-  p.y *= 1.0 - 0.25 * aWing * max(-flap, 0.0);
-  vec4 wp = vec4(p, 1.0);
-#ifdef USE_INSTANCING
-  wp = instanceMatrix * wp;
-#endif
-  wp = modelMatrix * wp;
-  vFlap = flap;
+  vPart = aPart; vUV = aUV; vPos = position;
+  float side = p.y >= 0.0 ? 1.0 : -1.0;
+  float ph = aAnim.x, amp = aAnim.y, bank = aAnim.z, bend = aAnim.w;
+  float tuck = aPose.x, peck = aPose.y, look = aPose.z;
+  // Measured starlings beat from about 55 deg below the body to 19 deg above, and the
+  // downstroke is quicker than the upstroke: warp the phase so it is.
+  ph = ph - 0.35 * sin(ph);
+  float up = max(cos(ph), 0.0);                                   // > 0 while the wing rises
+  vec3 n = normal;
+  if (aWing > 0.0) {
+    float S = 0.15 - 0.1 * tuck;
+    const float W = 0.62, H = 1.12;                              // wrist and hand, out from the body
+    float a1 = amp * 0.75 * sin(ph) + 0.1 - 0.4 * amp + 0.25 * tuck;   // shoulder: mostly below the body; tucked wings sit on the back
+    float a2 = a1 + amp * 0.45 * sin(ph - 0.7) - 0.2 * tuck;     // wrist lags
+    float a3 = a2 + amp * 0.35 * sin(ph - 1.4);                  // hand lags more: the tips whip
+    float fold = amp * up * 0.85;                                // upstroke: fold the hand back and in
+    float sweep = 0.18 * amp * max(-cos(ph), 0.0);               // downstroke: reach forward
+    float ay = abs(p.y);
+    vec2 xd = vec2(0.05 + (p.x - 0.05) * (1.0 - 0.7 * tuck), ay - 0.15);   // a folded wing is narrow
+    if (ay > W) {
+      vec2 o = vec2(p.x - 0.05, ay - W);
+      o = vec2(o.x - o.y * (fold * 0.9 - sweep), o.y * (1.0 - fold * 0.35));
+      xd = vec2(0.05 + o.x, W - 0.15 + o.y);
+    }
+    // Tucked: swing the whole wing back about the shoulder to lie along the body.
+    vec2 r = rot(vec2(xd.x - 0.05, xd.y), tuck * 1.42);
+    xd = vec2(0.05 + r.x, r.y * (1.0 - 0.45 * tuck));
+    float d = max(xd.y, 0.0);
+    vec2 q; float ang;
+    if (d < W - 0.15) { q = d * vec2(cos(a1), sin(a1)); ang = a1; }
+    else {
+      vec2 w = (W - 0.15) * vec2(cos(a1), sin(a1));
+      float e = d - (W - 0.15), lh = H - W;
+      if (e < lh) { q = w + e * vec2(cos(a2), sin(a2)); ang = a2; }
+      else { q = w + lh * vec2(cos(a2), sin(a2)) + (e - lh) * vec2(cos(a3), sin(a3)); ang = a3; }
+    }
+    p.x = xd.x; p.y = side * (S + q.x); p.z = q.y + p.z * cos(ang) + 0.17 * tuck;   // folded wings lie on the back
+    n.yz = rot(n.yz, side * ang);
+  } else if (p.x < -0.5) {
+    // Tail: fans out in a hard turn.
+    float t = (-0.5 - p.x) / 0.4;
+    p.y *= 1.0 + t * clamp(abs(bend) * 2.2, 0.0, 1.1);
+  } else if (p.x > 0.42) {
+    // Head: turns about the neck, and reaches forward and down to peck.
+    float h = smoothstep(0.42, 0.58, p.x);
+    vec2 hv = rot(vec2(p.x - 0.42, p.y), look * h);
+    p.xy = vec2(0.42 + hv.x, hv.y);
+    p.x += peck * 0.22 * h;
+    p.z -= peck * 0.2 * h;
+  }
+  // The spine bends into the turn: head and tail both swing toward the inside.
+  p.y += bend * (p.x * p.x) * (p.x > 0.0 ? 0.16 : 0.4);   // the tail swings more than the head
+  p.x -= abs(bend) * p.x * p.x * p.x * 0.08;
+  // Bank: roll about the length.
+  p.yz = rot(p.yz, bank); n.yz = rot(n.yz, bank);
+  vec4 wp = modelMatrix * (instanceMatrix * vec4(p, 1.0));
+  vec3 wn = normalize(mat3(instanceMatrix) * n);
+  float ndl = dot(wn, normalize(LIGHT));
+  vLight = (0.22 + 0.78 * (aWing > 0.0 ? abs(ndl) : max(ndl, 0.0))) * aTone;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }`;
 const BIRD_FRAG = /* glsl */`
-uniform float uSolid;
-varying float vFlap;
+// Starlings, tagged (alpha 0.55). Red: light. Green: colour code for the cell pass:
+// 0.1 bill, 0.2 eye, 0.3 pale spot, 0.32 buff feather edge, 0.35..0.95 glossy
+// plumage (sheen from purple on the head to green behind), 0.97 dull flight feathers.
+// The feathers are drawn here: overlapping body feathers with pale V-shaped tips
+// (the starling's winter spots), rows of wing coverts with buff tips, separate
+// flight feathers with dark gaps, shafts and buff edges, and the tail's six feathers.
+varying float vLight;
+varying float vPart;
+varying vec2 vUV;
+varying vec3 vPos;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void main(){
-  if (uSolid > 0.5) gl_FragColor = vec4(0.18, 14.0/31.0, 0.0, 1.0);            // the hawk
-  else gl_FragColor = vec4(clamp(vFlap*0.5 + 0.5, 0.01, 0.99), 0.0, 0.0, 0.55); // starlings, tagged
+  float l = vLight, c = 0.5;
+  int part = int(vPart + 0.5);
+  if (part == 1) c = 0.1;
+  else if (part == 2) c = 0.2;
+  else if (part == 0) {
+    c = 0.35 + 0.6 * clamp((0.7 - vPos.x) / 0.9, 0.0, 1.0);
+    vec2 g = vec2(vPos.x * 15.0, vUV.y * 26.0);
+    float row = floor(g.x); g.y += mod(row, 2.0) * 0.5;
+    vec2 f = fract(g) - vec2(0.5);
+    l *= 1.0 - 0.28 * smoothstep(0.3, 0.5, length(f * vec2(1.0, 1.15)));     // feather outlines
+    float rate = vPos.x > 0.45 ? 0.12 : mix(0.25, 0.6, clamp((0.45 - vPos.x) / 0.8, 0.0, 1.0));
+    vec2 tf = fract(g) - vec2(0.2, 0.5);                                     // tip: toward the tail
+    if (hash(floor(g)) < rate && tf.x < 0.1 && tf.x > -0.16 && abs(tf.y) < 0.2 + tf.x * 0.9) c = 0.3;
+  } else if (part == 3) {
+    float u = vUV.x, v = vUV.y;                                              // span, chord (0 leading edge)
+    if (v < 0.38) {                                                          // coverts, in overlapping rows
+      c = 0.85;
+      vec2 g = vec2(u * 22.0, v * 7.5); g.x += mod(floor(g.y), 2.0) * 0.5;
+      vec2 f = fract(g) - 0.5;
+      l *= 1.0 - 0.22 * smoothstep(0.3, 0.5, length(f));
+      if (f.y > 0.22 && abs(f.x) < 0.28 && hash(floor(g)) > 0.4) c = 0.32;  // buff tips
+    } else {                                                                 // flight feathers
+      c = 0.97;
+      float n = u < 0.42 ? 7.0 : 10.0, fu = (u < 0.42 ? u / 0.42 : (u - 0.42) / 0.58) * n, fx = fract(fu);
+      l *= 0.8 + 0.2 * smoothstep(0.0, 0.12, fx) * smoothstep(1.0, 0.88, fx);   // dark gaps between feathers
+      l *= 1.0 - 0.2 * smoothstep(0.05, 0.0, abs(fx - 0.45));                 // shaft
+      if (v > 0.92 || (fx > 0.95 && v > 0.5)) c = 0.32;                                     // buff edges
+    }
+  } else {                                                                   // tail
+    c = 0.9;
+    float fv = fract(vUV.y * 6.0);
+    l *= 0.8 + 0.2 * smoothstep(0.0, 0.12, fv) * smoothstep(1.0, 0.88, fv);
+    l *= 1.0 - 0.15 * smoothstep(0.05, 0.0, abs(fv - 0.5));
+    if (vUV.x > 0.9) c = 0.32;
+  }
+  gl_FragColor = vec4(clamp(l, 0.01, 0.99), c, 0.0, 0.55);
 }`;
+
 
 const gScene = new THREE.Scene();
 const gsolid = (cls, emit = 0) => solid(cls, 0, emit);
@@ -2335,16 +2471,87 @@ function stoneLantern() {
   return grp;
 }
 const BIRD_GEO = (() => {
-  const P = [], W = [];
-  const tri = (a, b, c, wa, wb, wc) => { P.push(...a, ...b, ...c); W.push(wa, wb, wc); };
-  tri([0.9, 0, 0], [-0.2, 0.12, 0], [-0.2, -0.12, 0], 0, 0, 0);
-  tri([-0.2, 0.12, 0], [-0.9, 0, 0], [-0.2, -0.12, 0], 0, 0, 0);
-  tri([0.25, 0.1, 0], [-0.25, 0.1, 0], [-0.35, 1.4, 0], 0, 0, 1);
-  tri([0.25, -0.1, 0], [-0.35, -1.4, 0], [-0.25, -0.1, 0], 0, 1, 0);
-  tri([-0.6, 0, 0], [-1.1, 0.3, 0], [-1.1, -0.3, 0], 0, 0, 0);
+  // A starling built like the fish: a lofted body with round head, bill and eyes,
+  // cambered wings with a feathered trailing edge, and a short square tail of
+  // separate feathers. Bird units: x forward (bill at +1.08), y left, z up.
+  // aWing = 0 on the body, otherwise how far out along the wing (0..1).
+  // aTone darkens the head and wing coverts and marks feather edges.
+  // aPart: 0 body, 1 bill, 2 eye, 3 wing, 4 tail; aUV: the grid's own coordinates, for feather patterns.
+  const P = [], W = [], T = [], I = [], PT = [], UV = [];
+  let part = 0;
+  const grid = (nu, nv, fn, wrapV = false) => {
+    const base = P.length / 3;
+    for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) {
+      const [x, y, z, w, t] = fn(i / nu, j / nv);
+      P.push(x, y, z); W.push(w); T.push(t); PT.push(part); UV.push(i / nu, j / nv);
+    }
+    for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
+      const a = base + i * (nv + 1) + j, b = a + nv + 1;
+      I.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  };
+  const lerpTab = (tab, x) => {
+    if (x <= tab[0][0]) return tab[0].slice(1);
+    for (let k = 1; k < tab.length; k++) if (x <= tab[k][0]) {
+      const [x0, ...a] = tab[k - 1], [x1, ...b] = tab[k], t = (x - x0) / (x1 - x0), e = t * t * (3 - 2 * t);
+      return a.map((v, i) => v + (b[i] - v) * e);
+    }
+    return tab[tab.length - 1].slice(1);
+  };
+  // Body: [x, half width, half height, centre z, tone]
+  const body = [[-0.52, 0.08, 0.05, 0.0, 0.85], [-0.38, 0.15, 0.11, 0.0, 0.85], [-0.15, 0.215, 0.16, 0.01, 0.88], [0.1, 0.23, 0.18, 0.02, 0.9],
+                [0.3, 0.19, 0.16, 0.03, 0.85], [0.44, 0.12, 0.11, 0.04, 0.78], [0.56, 0.13, 0.12, 0.05, 0.68], [0.7, 0.115, 0.1, 0.05, 0.62],
+                [0.8, 0.07, 0.06, 0.04, 0.6], [0.86, 0.035, 0.03, 0.035, 0.55]];
+  grid(30, 18, (u, v) => {
+    const x = -0.52 + u * 1.38, [w, h, zc, t] = lerpTab(body, x), a = v * Math.PI * 2, sa = Math.sin(a);
+    return [x, w * Math.cos(a), zc + h * sa * (sa < 0 ? 0.75 : 1), 0, t];
+  });
+  // Bill: a long pointed cone, starling-straight, yellow.
+  part = 1;
+  grid(6, 10, (u, v) => {
+    const x = 0.84 + u * 0.26, r = 0.036 * (1 - u) + 0.002, a = v * Math.PI * 2;
+    return [x, r * Math.cos(a), 0.035 - u * 0.012 + r * 0.8 * Math.sin(a), 0, 0.5];
+  });
+  // Eyes.
+  part = 2;
+  for (const sd of [1, -1]) grid(5, 8, (u, v) => {
+    const la = -Math.PI / 2 + u * Math.PI, lo = v * Math.PI * 2, r = 0.024;
+    return [0.71 + r * Math.cos(la) * Math.cos(lo), sd * 0.085 + r * Math.cos(la) * Math.sin(lo), 0.085 + r * Math.sin(la), 0, 0.15];
+  });
+  part = 3;
+  // Wings: long, pointed and swept, cambered over the chord; the trailing edge of
+  // the hand is cut into primary feathers, the arm into secondaries.
+  const S = 0.15, SP = 1.76;                              // wingspan ~1.8x body length, as in a real starling
+  const le = (u) => u < 0.38 ? 0.4 - u * 0.15 : 0.343 - Math.pow((u - 0.38) / 0.62, 1.1) * 1.0;
+  const teBase = (u) => u < 0.38 ? -0.4 - u * 0.1 : -0.438 - ((u - 0.38) / 0.62) * 0.24;
+  const feathers = (u) => {                               // scalloped trailing edge
+    const n = u < 0.42 ? 7 : 10, f = (u < 0.42 ? u / 0.42 : (u - 0.42) / 0.58) * n;
+    return Math.pow(Math.abs(Math.sin(f * Math.PI)), 0.6) * (u < 0.42 ? 0.025 : 0.05) * (1 - Math.pow(u, 6));
+  };
+  for (const sd of [1, -1]) grid(48, 6, (u, v) => {
+    const l = le(u), te = teBase(u) - feathers(u), x = l + (te - l) * v;
+    const camber = 0.045 * Math.sin(Math.PI * Math.min(1, v * 1.15)) * (1 - 0.7 * u);
+    const feat = Math.floor((u < 0.42 ? u / 0.42 * 7 : 7 + (u - 0.42) / 0.58 * 10));
+    let tone = v < 0.38 ? 0.8 : (feat % 2 ? 0.95 : 1.02);  // coverts darker; feathers alternate slightly
+    if (u > 0.85) tone *= 0.85;
+    return [x, sd * (S + u * (SP - S)), 0.05 * (1 - u) + camber, Math.max(u, 0.002), tone];
+  });
+  part = 4;
+  // Tail: short, square, of overlapping feathers with notched tips.
+  grid(8, 16, (u, v) => {
+    const yv = (v - 0.5) * 2, half = 0.1 + u * 0.09, y = yv * half;
+    const tip = 0.025 * Math.pow(Math.abs(Math.sin((v * 6) * Math.PI)), 0.7);
+    const x = -0.48 - u * (0.42 - tip);
+    const f = Math.floor(v * 6);
+    return [x, y, 0.01 + 0.02 * (1 - Math.abs(yv)) * (1 - u), 0, f % 2 ? 0.8 : 0.86];
+  });
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
   g.setAttribute("aWing", new THREE.Float32BufferAttribute(W, 1));
+  g.setAttribute("aTone", new THREE.Float32BufferAttribute(T, 1));
+  g.setAttribute("aPart", new THREE.Float32BufferAttribute(PT, 1));
+  g.setAttribute("aUV", new THREE.Float32BufferAttribute(UV, 2));
+  g.setIndex(I);
   g.computeVertexNormals();
   return g;
 })();
@@ -2379,7 +2586,7 @@ function buildGardenScene() {
       rock.position.set(x, y, -size * 0.22);
       rock.rotation.z = hash3i(gi, ri, 5) * 6.28;
       gScene.add(rock);
-      garden.built.push({ cx: x, cy: y, R: size * 1.02 });
+      garden.built.push({ cx: x, cy: y, R: size * 1.02, rock: true });
       if (sc >= 0.55) {
         const tufts = 1 + Math.floor(hash3i(gi, ri, 8) * 2);
         for (let t = 0; t < tufts; t++) {
@@ -2480,18 +2687,32 @@ function rakeSegment(ax, ay, bx, by) {
 }
 
 /* ---------------- starlings ---------------- */
+// Each starling is in one of four modes: flying with the flock, coming down to
+// land, on the ground (walking, pecking, looking about, the odd wing flick),
+// or taking off. Birds on the ground leave when the cursor comes near, when a
+// neighbour bolts, or when they have had enough.
+const FLY = 0, LAND = 1, GROUND = 2, TAKEOFF = 3;
 function initBirds() {
-  const N = (garden.N = clamp(Math.round((view.W * view.H) / 1800), 300, 650)), GCY = gardenCY();
-  const b = (garden.birds = { x: new Float32Array(N), y: new Float32Array(N), z: new Float32Array(N), vx: new Float32Array(N), vy: new Float32Array(N), next: new Int32Array(N), head: null });
+  const N = (garden.N = clamp(Math.round((view.W * view.H) / 45000), 16, 34)), GCY = gardenCY();
+  // Starlings sized against the koi: a body about a third of a koi, wings nearly half.
+  garden.bs = view.base * 0.15;
+  const F = () => new Float32Array(N);
+  const b = (garden.birds = { x: F(), y: F(), z: F(), vx: F(), vy: F(), next: new Int32Array(N), head: null,
+    ph: F(), amp: F(), bank: F(), bend: F(), face: F(), tm: F(), gl: new Uint8Array(N), rate: F(), gust: F(),
+    mode: new Uint8Array(N), lx: F(), ly: F(), gt: F(), act: F(), aT: F(), aK: new Uint8Array(N), aDir: F(),
+    tuck: F(), peck: F(), look: F(), lookT: F(), hop: F(), startle: F() });
   for (let i = 0; i < N; i++) {
-    const a = Math.random() * 6.283, r = Math.sqrt(Math.random()) * 120;
+    const a = Math.random() * 6.283, r = Math.sqrt(Math.random()) * 320;
     b.x[i] = Math.cos(a) * r; b.y[i] = GCY + Math.sin(a) * r * 0.7; b.z[i] = rand(150, 320);
-    b.vx[i] = 160 + rand(-20, 20); b.vy[i] = rand(-30, 30);
+    b.vx[i] = 320 + rand(-40, 40); b.vy[i] = rand(-60, 60);
+    b.ph[i] = rand(0, 6.283); b.amp[i] = 0.8; b.tm[i] = rand(0, 1.2); b.rate[i] = rand(0.88, 1.12); b.face[i] = Math.atan2(b.vy[i], b.vx[i]);
   }
-  const mat = new THREE.ShaderMaterial({ vertexShader: BIRD_VERT, fragmentShader: BIRD_FRAG, side: THREE.DoubleSide, uniforms: { uTime: { value: 0 }, uFlapRate: { value: 13 }, uSolid: { value: 0 } } });
-  const ph = new Float32Array(N); for (let i = 0; i < N; i++) ph[i] = Math.random();
+  const mat = new THREE.ShaderMaterial({ vertexShader: BIRD_VERT, fragmentShader: BIRD_FRAG, side: THREE.DoubleSide });
   const geo = BIRD_GEO.clone();
-  geo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(ph, 1));
+  garden.anim = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4);
+  garden.pose = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+  garden.anim.setUsage(THREE.DynamicDrawUsage); garden.pose.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute("aAnim", garden.anim); geo.setAttribute("aPose", garden.pose);
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   mesh.frustumCulled = false;
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -2499,59 +2720,205 @@ function initBirds() {
   $("bird-count").textContent = N;
 }
 
+/** A clear patch of sand to land on, or null. */
+function landingSpot(b, i, pw, PR) {
+  const GCY = gardenCY(), GW = view.GWc, GH = view.GH, BS = garden.bs, N = garden.N;
+  for (let k = 0; k < 8; k++) {
+    let x, y;
+    // Starlings like company: often come down next to a bird already feeding.
+    const j = (Math.random() * N) | 0;
+    if (Math.random() < 0.6 && b.mode[j] === GROUND) { const a = rand(0, 6.283), r = BS * rand(2.2, 5); x = b.x[j] + Math.cos(a) * r; y = b.y[j] + Math.sin(a) * r; }
+    else { const sp = Math.hypot(b.vx[i], b.vy[i]) || 1, d = rand(260, 520), l = rand(-200, 200); x = b.x[i] + b.vx[i] / sp * d - b.vy[i] / sp * l; y = b.y[i] + b.vy[i] / sp * d + b.vx[i] / sp * l; }
+    if (Math.abs(x) > GW * 0.42 || Math.abs(y - GCY) > GH * 0.32 || y - shoreY(x) < 70) continue;
+    if (garden.built.some((g) => Math.hypot(x - g.cx, y - g.cy) < g.R + BS * 1.4)) continue;
+    if (pw && Math.hypot(x - pw[0], y - pw[1]) < PR * 1.3) continue;
+    let crowded = false;
+    for (let q = 0; q < N && !crowded; q++) if (q !== i && b.mode[q] !== FLY && b.mode[q] !== TAKEOFF && Math.hypot(x - b.lx[q], y - b.ly[q]) < BS * 1.8) crowded = true;
+    if (crowded) continue;
+    return [x, y];
+  }
+  return null;
+}
+
 function stepBirds(dt) {
   const b = garden.birds, N = garden.N, t = clock, GCY = gardenCY(), GW = view.GWc, GH = view.GH;
-  // A grid over the garden (and a margin around it) for neighbour lookups.
-  const CELL = 42, gx0 = -GW, gy0 = GCY - GH, GWc = Math.ceil((GW * 2) / CELL) + 1, GHc = Math.ceil((GH * 2) / CELL) + 1;
+  const BS = garden.bs, K = BS / 3.8, CELL = Math.max(42, BS * 9), gx0 = -GW, gy0 = GCY - GH, GWc = Math.ceil((GW * 2) / CELL) + 1, GHc = Math.ceil((GH * 2) / CELL) + 1;
   if (!b.head || b.head.length !== GWc * GHc) b.head = new Int32Array(GWc * GHc);
   b.head.fill(-1);
   const gxOf = (x) => clamp(Math.floor((x - gx0) / CELL), 0, GWc - 1), gyOf = (y) => clamp(Math.floor((y - gy0) / CELL), 0, GHc - 1);
-  for (let i = 0; i < N; i++) { const c = gxOf(b.x[i]) + gyOf(b.y[i]) * GWc; b.next[i] = b.head[c]; b.head[c] = i; }
+  // Only birds in the air flock together.
+  for (let i = 0; i < N; i++) if (b.mode[i] === FLY || b.mode[i] === TAKEOFF) { const c = gxOf(b.x[i]) + gyOf(b.y[i]) * GWc; b.next[i] = b.head[c]; b.head[c] = i; }
   // A wandering point the flock swirls around, mostly over the garden.
   const axp = Math.sin(t * 0.11) * GW * 0.3 + Math.sin(t * 0.27 + 1) * GW * 0.08, ayp = GCY + Math.sin(t * 0.17 + 2) * GH * 0.25;
   const pw = pointer.inside ? toWorld(pointer.x, pointer.y) : null;
-  const R2 = 38 * 38, S = 13;
+  const RN = BS * 9, R2 = RN * RN, S = BS * 4.2, PR = 130 + BS * 4;
+  let grounded = 0;
+  for (let i = 0; i < N; i++) if (b.mode[i] !== FLY) grounded++;
+  const near = (i) => pw && Math.hypot(b.x[i] - pw[0], b.y[i] - pw[1]) < PR;
+  const takeOff = (i, awayX, awayY) => {
+    b.mode[i] = TAKEOFF; b.gl[i] = 0; b.tm[i] = rand(0.8, 1.4);
+    const a = awayX !== undefined ? Math.atan2(awayY, awayX) + rand(-0.5, 0.5) : b.face[i] + rand(-0.6, 0.6);
+    b.vx[i] = Math.cos(a) * 170; b.vy[i] = Math.sin(a) * 170;
+    // The alarm spreads: neighbours on the ground go too, a beat later.
+    for (let j = 0; j < N; j++) if (b.mode[j] === GROUND && j !== i && Math.hypot(b.x[j] - b.x[i], b.y[j] - b.y[i]) < BS * 6 && b.startle[j] <= 0) b.startle[j] = rand(0.08, 0.35);
+  };
+
   for (let i = 0; i < N; i++) {
-    const x = b.x[i], y = b.y[i];
-    let ax = 0, ay = 0, cx = 0, cy = 0, n = 0, sx = 0, sy = 0;
-    const gx = gxOf(x), gy = gyOf(y);
-    for (let yy = Math.max(0, gy - 1); yy <= Math.min(GHc - 1, gy + 1); yy++) for (let xx = Math.max(0, gx - 1); xx <= Math.min(GWc - 1, gx + 1); xx++) {
-      for (let j = b.head[xx + yy * GWc]; j !== -1; j = b.next[j]) {
-        if (j === i) continue;
-        const dx = b.x[j] - x, dy = b.y[j] - y, d2 = dx * dx + dy * dy;
-        if (d2 > R2) continue;
-        ax += b.vx[j]; ay += b.vy[j]; cx += dx; cy += dy; n++;
-        if (d2 < S * S) { const d = Math.sqrt(d2) || 1; sx -= (dx / d) * (S - d); sy -= (dy / d) * (S - d); }
+    const x = b.x[i], y = b.y[i], mode = b.mode[i];
+    if (mode === GROUND) {
+      /* ---- on the ground ---- */
+      b.gt[i] -= dt;
+      if (b.startle[i] > 0 && (b.startle[i] -= dt) <= 0) { takeOff(i, x - (pw ? pw[0] : x - Math.cos(b.face[i])), y - (pw ? pw[1] : y - Math.sin(b.face[i]))); continue; }
+      if (near(i)) { takeOff(i, x - pw[0], y - pw[1]); continue; }
+      if (b.gt[i] <= 0) { takeOff(i); continue; }
+      // Small actions, one at a time: walk a few steps, turn, peck, look about, flick the wings.
+      b.aT[i] -= dt;
+      if (b.aT[i] <= 0) {
+        const r = Math.random();
+        b.aK[i] = r < 0.34 ? 1 : r < 0.52 ? 2 : r < 0.8 ? 3 : r < 0.93 ? 4 : 5;
+        b.aT[i] = b.aK[i] === 1 ? rand(0.4, 1.1) : b.aK[i] === 3 ? rand(0.5, 1.0) : b.aK[i] === 5 ? 0.35 : rand(0.25, 0.6);
+        b.aDir[i] = rand(-1, 1);
+        b.act[i] = 0;
+      }
+      b.act[i] += dt;
+      let tPeck = 0, tLook = b.look[i] * 0.9, wingFlick = 0;
+      if (b.aK[i] === 1) {            // walk: quick little steps with a bob
+        const sp = BS * 1.4, cyc = (b.act[i] * 7) % 1;
+        b.face[i] += b.aDir[i] * dt * 0.8;
+        const v = sp * (0.4 + 0.6 * Math.sin(cyc * Math.PI));
+        b.x[i] += Math.cos(b.face[i]) * v * dt; b.y[i] += Math.sin(b.face[i]) * v * dt;
+        b.hop[i] = Math.sin(cyc * Math.PI) * BS * 0.04;
+      } else if (b.aK[i] === 2) {     // turn on the spot
+        b.face[i] += b.aDir[i] * dt * 3.2; b.hop[i] = 0;
+      } else if (b.aK[i] === 3) {     // peck, peck
+        tPeck = Math.max(0, Math.sin(b.act[i] * 11)) ; b.hop[i] = 0;
+      } else if (b.aK[i] === 4) {     // look about
+        tLook = b.aDir[i] * 0.9; b.hop[i] = 0;
+      } else {                        // shake the wings out
+        wingFlick = Math.sin(Math.min(1, b.act[i] / 0.35) * Math.PI);
+      }
+      // Stay off rocks, in the garden, and apart.
+      for (const g of garden.built) { const dx = b.x[i] - g.cx, dy = b.y[i] - g.cy, d = Math.hypot(dx, dy) || 1, m = g.R + BS * 0.9; if (d < m) { b.x[i] = g.cx + dx / d * m; b.y[i] = g.cy + dy / d * m; } }
+      if (b.y[i] - shoreY(b.x[i]) < 60 || Math.abs(b.x[i]) > GW * 0.45) b.face[i] += dt * 4;
+      b.lx[i] = b.x[i]; b.ly[i] = b.y[i];
+      b.peck[i] += (tPeck - b.peck[i]) * Math.min(1, dt * 18);
+      b.look[i] += (tLook - b.look[i]) * Math.min(1, dt * 9);
+      b.tuck[i] += (1 - wingFlick * 0.7 - b.tuck[i]) * Math.min(1, dt * 10);
+      b.amp[i] += (wingFlick * 0.55 - b.amp[i]) * Math.min(1, dt * 14);
+      b.ph[i] += dt * 30 * wingFlick;
+      b.z[i] = b.hop[i];
+      b.bank[i] *= Math.exp(-dt * 8); b.bend[i] *= Math.exp(-dt * 8);
+      continue;
+    }
+
+    /* ---- in the air: flying, landing or taking off ---- */
+    let fx = 0, fy = 0;
+    if (mode === LAND) {
+      // Glide in, then flare: slow right down with big beats just before touching down.
+      const dx = b.lx[i] - x, dy = b.ly[i] - y, d = Math.hypot(dx, dy) || 1;
+      const want = Math.min(330, 30 + d * 1.1);
+      fx += (dx / d * want - b.vx[i]) * 3.2; fy += (dy / d * want - b.vy[i]) * 3.2;
+      b.z[i] += (Math.min(230, d * 0.55) - b.z[i]) * Math.min(1, dt * 3);
+      if (near(i) || (pw && Math.hypot(b.lx[i] - pw[0], b.ly[i] - pw[1]) < PR)) { b.mode[i] = TAKEOFF; b.tm[i] = 0.8; }
+      if (d < 6 && b.z[i] < 8) {
+        b.mode[i] = GROUND; b.x[i] = b.lx[i]; b.y[i] = b.ly[i]; b.vx[i] = b.vy[i] = 0; b.z[i] = 0;
+        b.gt[i] = rand(5, 14); b.aT[i] = rand(0.2, 0.6); b.aK[i] = 0; b.startle[i] = 0;
+        continue;
+      }
+    } else {
+      let ax = 0, ay = 0, cx = 0, cy = 0, n = 0, sx = 0, sy = 0;
+      const gx = gxOf(x), gy = gyOf(y);
+      for (let yy = Math.max(0, gy - 1); yy <= Math.min(GHc - 1, gy + 1); yy++) for (let xx = Math.max(0, gx - 1); xx <= Math.min(GWc - 1, gx + 1); xx++) {
+        for (let j = b.head[xx + yy * GWc]; j !== -1; j = b.next[j]) {
+          if (j === i) continue;
+          const dx = b.x[j] - x, dy = b.y[j] - y, d2 = dx * dx + dy * dy;
+          if (d2 > R2) continue;
+          ax += b.vx[j]; ay += b.vy[j]; cx += dx; cy += dy; n++;
+          if (d2 < S * S) { const d = Math.sqrt(d2) || 1; sx -= (dx / d) * (S - d); sy -= (dy / d) * (S - d); }
+        }
+      }
+      if (n) { fx += (ax / n - b.vx[i]) * 1.4 + (cx / n) * 1.1; fy += (ay / n - b.vy[i]) * 1.4 + (cy / n) * 1.1; }
+      fx += sx * 60 / K; fy += sy * 60 / K;
+      const dxa = axp - x, dya = ayp - y, da = Math.hypot(dxa, dya) || 1;
+      fx += ((dxa / da) * 70 - (dya / da) * 40) * 2; fy += ((dya / da) * 70 + (dxa / da) * 40) * 2;
+      if (Math.abs(x) > GW * 0.5) fx -= Math.sign(x) * 520;
+      if (Math.abs(y - GCY) > GH * 0.3) fy -= Math.sign(y - GCY) * 700;
+      if (mode === TAKEOFF) {
+        b.z[i] += (240 - b.z[i]) * Math.min(1, dt * 1.6);
+        b.tm[i] -= dt;
+        if (b.tm[i] <= 0 && b.z[i] > 150) b.mode[i] = FLY;
+      } else {
+        b.z[i] += ((210 + 90 * Math.sin(t * 0.3 + x * 0.004)) - b.z[i]) * dt * 0.5;
+        // Now and then a bird peels off to feed on the sand.
+        if (!near(i) && grounded < N * 0.4 && Math.random() < dt * 0.08) {
+          const spot = landingSpot(b, i, pw, PR);
+          if (spot) { b.mode[i] = LAND; b.lx[i] = spot[0]; b.ly[i] = spot[1]; grounded++; }
+        }
       }
     }
-    let fx = 0, fy = 0;
-    if (n) { fx += (ax / n - b.vx[i]) * 1.4 + (cx / n) * 1.1; fy += (ay / n - b.vy[i]) * 1.4 + (cy / n) * 1.1; }
-    fx += sx * 22; fy += sy * 22;
-    const dxa = axp - x, dya = ayp - y, da = Math.hypot(dxa, dya) || 1;
-    fx += (dxa / da) * 70 - (dya / da) * 40; fy += (dya / da) * 70 + (dxa / da) * 40;
-    if (Math.abs(x) > GW * 0.5) fx -= Math.sign(x) * 260;
-    if (Math.abs(y - GCY) > GH * 0.42) fy -= Math.sign(y - GCY) * 260;
     if (pw) {
       const dx = x - pw[0], dy = y - pw[1], d = Math.hypot(dx, dy);
-      if (d < 130 && d > 0) { const k = (1 - d / 130) * 1400; fx += (dx / d) * k; fy += (dy / d) * k; }
+      if (d < PR && d > 0) { const k = (1 - d / PR) * 2800; fx += (dx / d) * k; fy += (dy / d) * k; }
     }
     let vx = b.vx[i] + fx * dt, vy = b.vy[i] + fy * dt;
-    const v = Math.hypot(vx, vy) || 1, vc = clamp(v, 110, 240);
+    // Effort: how hard the bird is pushing decides flap or glide.
+    const along = (fx * b.vx[i] + fy * b.vy[i]) / (Math.hypot(b.vx[i], b.vy[i]) || 1);
+    b.tm[i] -= mode === FLY ? dt : 0;
+    if (mode === FLY && (b.tm[i] <= 0 || (b.gl[i] && along > 260))) {
+      if (b.gl[i] || along > 120) { b.gl[i] = 0; b.tm[i] = rand(0.5, 1.3); }      // a burst of beats
+      else { b.gl[i] = 1; b.tm[i] = rand(0.35, 0.9); }                           // then a glide
+    }
+    const v = Math.hypot(vx, vy) || 1;
+    const lo = mode === LAND ? 20 : mode === TAKEOFF ? 150 : 220;
+    const vc = clamp(v, lo, 480);
     vx *= vc / v; vy *= vc / v;
     b.vx[i] = vx; b.vy[i] = vy;
     b.x[i] = x + vx * dt; b.y[i] = y + vy * dt;
-    b.z[i] += ((210 + 90 * Math.sin(t * 0.3 + x * 0.004)) - b.z[i]) * dt * 0.5;
   }
-  const arr = garden.mesh.instanceMatrix.array, s = 3.8;
+
+  // Pose and wingbeat, then the instance matrices.
+  const arr = garden.mesh.instanceMatrix.array, sc = BS, an = garden.anim.array, po = garden.pose.array;
   for (let i = 0; i < N; i++) {
-    const a = Math.atan2(b.vy[i], b.vx[i]), c = Math.cos(a) * s, sn = Math.sin(a) * s, o = i * 16;
+    const mode = b.mode[i];
+    if (mode !== GROUND) {
+      // Face along the flight path, but turn with some weight, not instantly.
+      const want = Math.atan2(b.vy[i], b.vx[i]);
+      let dh = want - b.face[i]; dh -= Math.round(dh / 6.2832) * 6.2832;
+      const step = clamp(dh, -dt * 7, dt * 7);
+      b.face[i] += step;
+      const turn = step / Math.max(dt, 1e-3);
+      b.gust[i] += (rand(-1, 1) * 0.5 - b.gust[i]) * Math.min(1, dt * 2.5);
+      b.bank[i] += (clamp(-turn * 0.35, -0.8, 0.8) + b.gust[i] * 0.12 - b.bank[i]) * Math.min(1, dt * 5);
+      b.bend[i] += (clamp(turn * 0.2, -0.55, 0.55) - b.bend[i]) * Math.min(1, dt * 8);
+      // The head leads the turn and holds steady against the roll.
+      b.look[i] += (clamp(turn * 0.08, -0.15, 0.15) - b.look[i]) * Math.min(1, dt * 10);
+      b.peck[i] *= Math.exp(-dt * 10);
+      b.tuck[i] += (0 - b.tuck[i]) * Math.min(1, dt * (mode === TAKEOFF ? 14 : 6));
+      const flee = !!near(i);
+      let tAmp, rate;
+      if (mode === TAKEOFF) { tAmp = 1.15; rate = 24; }
+      else if (mode === LAND) {
+        const d = Math.hypot(b.lx[i] - b.x[i], b.ly[i] - b.y[i]);
+        const flare = d < BS * 3.5;
+        tAmp = flare ? 1.0 : 0.05; rate = flare ? 21 : 6;
+      } else {
+        const flap = !b.gl[i] || flee;
+        tAmp = flee ? 1.05 : flap ? 0.85 : 0.06; rate = flee ? 23 : flap ? 16 : 16 * b.amp[i];
+      }
+      b.amp[i] += (tAmp - b.amp[i]) * Math.min(1, dt * (tAmp > b.amp[i] ? 7 : 3));
+      b.ph[i] += dt * b.rate[i] * rate;
+    }
+    const a = b.face[i], c = Math.cos(a) * sc, sn = Math.sin(a) * sc, o = i * 16;
+    an[i * 4] = b.ph[i]; an[i * 4 + 1] = b.amp[i]; an[i * 4 + 2] = b.bank[i]; an[i * 4 + 3] = b.bend[i];
+    po[i * 3] = b.tuck[i]; po[i * 3 + 1] = b.peck[i]; po[i * 3 + 2] = b.look[i];
     arr[o] = c; arr[o + 1] = sn; arr[o + 2] = 0; arr[o + 3] = 0;
     arr[o + 4] = -sn; arr[o + 5] = c; arr[o + 6] = 0; arr[o + 7] = 0;
-    arr[o + 8] = 0; arr[o + 9] = 0; arr[o + 10] = s; arr[o + 11] = 0;
+    arr[o + 8] = 0; arr[o + 9] = 0; arr[o + 10] = sc; arr[o + 11] = 0;
     arr[o + 12] = b.x[i]; arr[o + 13] = b.y[i]; arr[o + 14] = b.z[i]; arr[o + 15] = 1;
   }
   garden.mesh.instanceMatrix.needsUpdate = true;
-  garden.birdMat.uniforms.uTime.value = t;
+  garden.anim.needsUpdate = true;
+  garden.pose.needsUpdate = true;
 }
 
 function layoutGarden() {
@@ -2652,7 +3019,13 @@ async function start() {
   if (fromHash) { openProject(fromHash); if (cam.target) { view.panX = cam.target.x; view.panY = cam.target.y; cam.target = null; } }
   let last = performance.now(), frameN = 0;
   const t0 = last;
+  window.pondStarted = true;
+  let failed = 0;
   const frame = (now) => {
+    requestAnimationFrame(frame);
+    try { render(now); } catch (e) { console.error(e); if (++failed === 1) window.pondFail?.("The pond hit an error: " + e.message); }
+  };
+  const render = (now) => {
     const dt = Math.min(0.05, (now - last) / 1000) * (reduce ? 0.5 : 1);
     last = now; clock += dt;
     step(dt);
@@ -2680,7 +3053,6 @@ async function start() {
     renderer.render(gScene, camera);
     renderer.setRenderTarget(cellT); renderer.render(cellScene, quadCam);
     renderer.setRenderTarget(null); renderer.render(screenScene, quadCam);
-    requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
 }
