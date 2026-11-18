@@ -43,6 +43,7 @@ vec4 shadeAt(vec2 c, bool dryOnly, out float cover, out float bird, out float bi
 vec3 birdColor(float c, float l){
   if (c < 0.15) return vec3(0.98, 0.78, 0.18) * (0.75 + 0.35*l);                 // bill
   if (c < 0.25) return vec3(0.05);                                              // eye
+  if (c < 0.28) return vec3(0.62, 0.36, 0.3) * (0.6 + 0.4*l);                    // legs, pinkish brown
   if (c < 0.31) return vec3(0.95, 0.89, 0.72) * (0.8 + 0.25*l);                  // pale spots
   if (c < 0.34) return vec3(0.62, 0.5, 0.33) * (0.7 + 0.4*l);                     // buff feather edges
   if (c > 0.96) return mix(vec3(0.07, 0.065, 0.06), vec3(0.32, 0.28, 0.22), pow(l, 2.0) * 0.7);   // flight feathers: dull, buff-edged

@@ -1,19 +1,28 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js";
 import { state } from "../state.js";
 import { $, clamp, rand, toWorld, view } from "../world.js";
+import { smooth } from "../geometry.js";
 import { pointer } from "../pond/swimming.js";
 import { gardenCY, shoreY } from "./terrain.js";
 import { BIRD_FRAG, BIRD_VERT } from "../shaders/bird.js";
-import { BIRD_GEO, garden } from "./scene.js";
+import { garden } from "./scene.js";
+import { BIRD_GEO } from "./bird-model.js";
 import { sky } from "../sky.js";
 import { weather, windVec } from "../weather.js";
 
 /* ---------------- starlings ---------------- */
 // Each starling is in one of four modes: flying with the flock, coming down to
-// land, on the ground (walking, pecking, looking about, the odd wing flick),
-// or taking off. Birds on the ground leave when the cursor comes near, when a
-// neighbour bolts, or when they have had enough.
+// land, on the ground, or taking off. Birds on the ground leave when the cursor
+// comes near, when a neighbour bolts, or when they have had enough.
+// On the ground a bird does one small thing at a time (walk, probe the sand, stand
+// and look about, hop, preen, shake itself out, flick its wings), and some things
+// all the time: it breathes, its head moves in quick turns and then holds still
+// (as birds' heads do), and now and then it flicks its tail.
 const FLY = 0, LAND = 1, GROUND = 2, TAKEOFF = 3;
+const WALK = 1, PROBE = 2, STAND = 3, ALERT = 4, HOP = 5, PREEN = 6, SHAKE = 7, FLICK = 8;
+const H0 = 0.4;                         // body centre above the ground when standing (BIRD_VERT)
+/** Ease v toward target at rate (1/s). */
+const ease = (v, target, rate, dt) => v + (target - v) * Math.min(1, dt * rate);
 export function initBirds() {
   const N = (garden.N = clamp(Math.round((view.W * view.H) / 45000), 16, 34)), GCY = gardenCY();
   // Starlings sized against the koi: a body about a third of a koi, wings nearly half.
@@ -22,19 +31,22 @@ export function initBirds() {
   const b = (garden.birds = { x: F(), y: F(), z: F(), vx: F(), vy: F(), next: new Int32Array(N), head: null,
     ph: F(), amp: F(), bank: F(), bend: F(), face: F(), tm: F(), gl: new Uint8Array(N), rate: F(), gust: F(),
     mode: new Uint8Array(N), lx: F(), ly: F(), gt: F(), act: F(), aT: F(), aK: new Uint8Array(N), aDir: F(),
-    tuck: F(), peck: F(), look: F(), lookT: F(), hop: F(), startle: F() });
+    tuck: F(), nod: F(), look: F(), lookT: F(), sacT: F(), pitch: F(), stance: F(), step: F(), stepAmt: F(), reach: F(),
+    fan: F(), tail: F(), fluff: F(), stretch: F(), hop: F(), startle: F(), impact: F(), flick: F(), age: F() });
   for (let i = 0; i < N; i++) {
     const a = Math.random() * 6.283, r = Math.sqrt(Math.random()) * 320;
     b.x[i] = Math.cos(a) * r; b.y[i] = GCY + Math.sin(a) * r * 0.7; b.z[i] = rand(150, 320);
     b.vx[i] = 320 + rand(-40, 40); b.vy[i] = rand(-60, 60);
-    b.ph[i] = rand(0, 6.283); b.amp[i] = 0.8; b.tm[i] = rand(0, 1.2); b.rate[i] = rand(0.88, 1.12); b.face[i] = Math.atan2(b.vy[i], b.vx[i]);
+    b.ph[i] = rand(0, 6.283); b.amp[i] = 0.8; b.stretch[i] = 0.3; b.age[i] = rand(0, 100); b.tm[i] = rand(0, 1.2); b.rate[i] = rand(0.88, 1.12); b.face[i] = Math.atan2(b.vy[i], b.vx[i]);
   }
   const mat = new THREE.ShaderMaterial({ vertexShader: BIRD_VERT, fragmentShader: BIRD_FRAG, side: THREE.DoubleSide });
   const geo = BIRD_GEO.clone();
-  garden.anim = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4);
-  garden.pose = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
-  garden.anim.setUsage(THREE.DynamicDrawUsage); garden.pose.setUsage(THREE.DynamicDrawUsage);
-  geo.setAttribute("aAnim", garden.anim); geo.setAttribute("aPose", garden.pose);
+  // Per bird: aAnim = (beat phase, amplitude, bank, bend), aPose = (tuck, nod, look, pitch),
+  // aPose2 = (stance, step phase, step amount, leg reach), aPose3 = (tail fan, tail lift, fluff, neck stretch).
+  for (const k of ["aAnim", "aPose", "aPose2", "aPose3"]) {
+    const a = (garden[k] = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4));
+    a.setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, a);
+  }
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   mesh.frustumCulled = false;
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -83,12 +95,23 @@ export function stepBirds(dt) {
   const near = (i) => pw && Math.hypot(b.x[i] - pw[0], b.y[i] - pw[1]) < PR;
   const takeOff = (i, awayX, awayY) => {
     b.mode[i] = TAKEOFF; b.gl[i] = 0; b.tm[i] = rand(0.8, 1.4);
+    b.amp[i] = Math.max(b.amp[i], 0.7); b.reach[i] = 0.6; b.aK[i] = 0;
     const a = awayX !== undefined ? Math.atan2(awayY, awayX) + rand(-0.5, 0.5) : b.face[i] + rand(-0.6, 0.6);
     b.vx[i] = Math.cos(a) * 170; b.vy[i] = Math.sin(a) * 170;
     // The alarm spreads: neighbours on the ground go too, a beat later.
     for (let j = 0; j < N; j++) if (b.mode[j] === GROUND && j !== i && Math.hypot(b.x[j] - b.x[i], b.y[j] - b.y[i]) < BS * 6 && b.startle[j] <= 0) b.startle[j] = rand(0.08, 0.35);
   };
 
+  const pickAction = (i) => {
+    const r = Math.random();
+    const k = (b.aK[i] = r < 0.3 ? WALK : r < 0.58 ? PROBE : r < 0.7 ? STAND : r < 0.81 ? ALERT : r < 0.87 ? HOP : r < 0.92 ? PREEN : r < 0.96 ? SHAKE : FLICK);
+    b.aT[i] = k === WALK ? rand(0.7, 2.2) : k === PROBE ? rand(1, 2.2) : k === STAND ? rand(0.3, 1) : k === ALERT ? rand(0.6, 1.6)
+      : k === HOP ? 0.32 : k === PREEN ? rand(1.2, 2.4) : k === SHAKE ? 0.5 : 0.42;
+    b.aDir[i] = rand(-1, 1); b.act[i] = 0;
+    if (Math.random() < 0.25) b.flick[i] = 0.3;                  // and a flick of the tail
+  };
+
+  for (let i = 0; i < N; i++) b.age[i] += dt;
   for (let i = 0; i < N; i++) {
     const x = b.x[i], y = b.y[i], mode = b.mode[i];
     if (mode === GROUND) {
@@ -97,43 +120,71 @@ export function stepBirds(dt) {
       if (b.startle[i] > 0 && (b.startle[i] -= dt) <= 0) { takeOff(i, x - (pw ? pw[0] : x - Math.cos(b.face[i])), y - (pw ? pw[1] : y - Math.sin(b.face[i]))); continue; }
       if (near(i)) { takeOff(i, x - pw[0], y - pw[1]); continue; }
       if (b.gt[i] <= 0 || (leave && Math.random() < dt * 1.5)) { takeOff(i); continue; }
-      // Small actions, one at a time: walk a few steps, turn, peck, look about, flick the wings.
-      b.aT[i] -= dt;
-      if (b.aT[i] <= 0) {
-        const r = Math.random();
-        b.aK[i] = r < 0.34 ? 1 : r < 0.52 ? 2 : r < 0.8 ? 3 : r < 0.93 ? 4 : 5;
-        b.aT[i] = b.aK[i] === 1 ? rand(0.4, 1.1) : b.aK[i] === 3 ? rand(0.5, 1.0) : b.aK[i] === 5 ? 0.35 : rand(0.25, 0.6);
-        b.aDir[i] = rand(-1, 1);
-        b.act[i] = 0;
-      }
-      b.act[i] += dt;
-      let tPeck = 0, tLook = b.look[i] * 0.9, wingFlick = 0;
-      if (b.aK[i] === 1) {            // walk: quick little steps with a bob
-        const sp = BS * 1.4, cyc = (b.act[i] * 7) % 1;
-        b.face[i] += b.aDir[i] * dt * 0.8;
-        const v = sp * (0.4 + 0.6 * Math.sin(cyc * Math.PI));
+      if (b.aT[i] <= 0) pickAction(i);
+      b.aT[i] -= dt; b.act[i] += dt;
+      const k = b.aK[i], e = b.act[i];
+      // What the pose is heading for; each action changes some of these.
+      let tNod = 0.1, tPitch = -0.3, tStretch = 0.15, tFluff = 0, tTuck = 1, tFan = 0, tTail = 0.05, tStep = 0, tLook = null;
+      let lookRange = 0.7, sac0 = 0.35, sac1 = 1.1;
+      b.hop[i] = 0;
+      if (k === WALK) {               // walk: steps with planted feet, a little waddle, small changes of course
+        const v = BS * (1.1 + 0.4 * Math.abs(b.aDir[i]));
+        b.face[i] += b.aDir[i] * dt * 0.8 + Math.sin(e * 3.1 + i) * dt * 0.6;
         b.x[i] += Math.cos(b.face[i]) * v * dt; b.y[i] += Math.sin(b.face[i]) * v * dt;
-        b.hop[i] = Math.sin(cyc * Math.PI) * BS * 0.04;
-      } else if (b.aK[i] === 2) {     // turn on the spot
-        b.face[i] += b.aDir[i] * dt * 3.2; b.hop[i] = 0;
-      } else if (b.aK[i] === 3) {     // peck, peck
-        tPeck = Math.max(0, Math.sin(b.act[i] * 11)) ; b.hop[i] = 0;
-      } else if (b.aK[i] === 4) {     // look about
-        tLook = b.aDir[i] * 0.9; b.hop[i] = 0;
-      } else {                        // shake the wings out
-        wingFlick = Math.sin(Math.min(1, b.act[i] / 0.35) * Math.PI);
+        b.step[i] += (v * dt * 0.6) / (0.3 * BS);
+        tStep = 1; tPitch = -0.14; tStretch = 0; lookRange = 0.35;
+      } else if (k === PROBE) {       // probe: tip forward and jab the bill into the sand, again and again
+        const j = (e % 0.5) / 0.5, env = smooth(0, 0.14, j) * (1 - smooth(0.55, 0.8, j));
+        tNod = 0.35 + 0.45 * env; tPitch = 0.25 + 0.15 * env; tStretch = 0.1; lookRange = 0.18; sac0 = 0.4; sac1 = 0.6;
+        if (j < 0.1) b.step[i] += dt * 0.6;     // shuffle the feet between jabs
+        tStep = 0.25;
+      } else if (k === ALERT) {       // stand tall and look about, quickly
+        tPitch = -0.45; tStretch = 0.75; tFluff = -0.03; lookRange = 1.15; sac0 = 0.18; sac1 = 0.55;
+      } else if (k === HOP) {         // a hop forward, wings half open
+        const kk = Math.min(1, e / 0.32);
+        b.hop[i] = Math.sin(Math.PI * kk) * BS * 0.22;
+        b.x[i] += Math.cos(b.face[i]) * BS * 2 * dt; b.y[i] += Math.sin(b.face[i]) * BS * 2 * dt;
+        tTuck = 0.8; tPitch = -0.2; tTail = -0.1; tFan = 0.3;
+      } else if (k === PREEN) {       // turn the head right round to the wing and nibble
+        const sd = b.aDir[i] < 0 ? -1 : 1;
+        tLook = sd * (2.25 + 0.15 * Math.sin(e * 3)); tNod = 0.55 + 0.12 * Math.sin(e * 23); tFluff = 0.08; tTuck = 0.94; tPitch = -0.1;
+      } else if (k === SHAKE) {       // fluff up and shake it all out
+        const env = Math.sin(Math.PI * Math.min(1, e / 0.5));
+        tFluff = 0.18 * env; tLook = 0.45 * Math.sin(e * 48) * env; tTuck = 1 - 0.3 * env * Math.abs(Math.sin(e * 40));
+        tFan = 0.6 * env; tTail = 0.05 + 0.2 * env * Math.sin(e * 36);
+      } else if (k === FLICK) {       // flick the wings, twice
+        const env = Math.abs(Math.sin((e / 0.42) * Math.PI * 2));
+        tTuck = 1 - 0.5 * env; tTail = 0.05 + 0.25 * env; tPitch = -0.35;
       }
+      if (b.flick[i] > 0) { b.flick[i] -= dt; tTail += 0.4 * Math.sin((Math.PI * Math.max(0, b.flick[i])) / 0.3); }
+      tFluff += 0.012 * Math.sin(b.age[i] * 4.5);                 // breathing
+      // The head: a quick turn, then hold still.
+      if (tLook === null) {
+        if ((b.sacT[i] -= dt) <= 0) { b.lookT[i] = rand(-1, 1) * lookRange; b.sacT[i] = rand(sac0, sac1); }
+        tLook = b.lookT[i];
+      }
+      // A landing settles: the body dips and tips forward, then straightens up.
+      b.impact[i] = Math.max(0, b.impact[i] - dt * 4);
+      tPitch += 0.35 * b.impact[i];
       // Stay off rocks, in the garden, and apart.
       for (const g of garden.built) { const dx = b.x[i] - g.cx, dy = b.y[i] - g.cy, d = Math.hypot(dx, dy) || 1, m = g.R + BS * 0.9; if (d < m) { b.x[i] = g.cx + dx / d * m; b.y[i] = g.cy + dy / d * m; } }
       if (b.y[i] - shoreY(b.x[i]) < 60 || Math.abs(b.x[i]) > GW * 0.45) b.face[i] += dt * 4;
       b.lx[i] = b.x[i]; b.ly[i] = b.y[i];
-      b.peck[i] += (tPeck - b.peck[i]) * Math.min(1, dt * 18);
-      b.look[i] += (tLook - b.look[i]) * Math.min(1, dt * 9);
-      b.tuck[i] += (1 - wingFlick * 0.7 - b.tuck[i]) * Math.min(1, dt * 10);
-      b.amp[i] += (wingFlick * 0.55 - b.amp[i]) * Math.min(1, dt * 14);
-      b.ph[i] += dt * 30 * wingFlick;
+      b.look[i] = k === SHAKE ? tLook : ease(b.look[i], tLook, 24, dt);
+      b.nod[i] = ease(b.nod[i], tNod, 20, dt);
+      b.pitch[i] = ease(b.pitch[i], tPitch, 8, dt);
+      b.stretch[i] = ease(b.stretch[i], tStretch, 8, dt);
+      b.fluff[i] = ease(b.fluff[i], tFluff, k === SHAKE ? 30 : 8, dt);
+      b.tuck[i] = ease(b.tuck[i], tTuck, 14, dt);
+      b.fan[i] = ease(b.fan[i], tFan, 10, dt);
+      b.tail[i] = ease(b.tail[i], tTail, 16, dt);
+      b.stepAmt[i] = ease(b.stepAmt[i], tStep, 8, dt);
+      b.stance[i] = ease(b.stance[i], 1 - 0.3 * b.impact[i], 12, dt);
+      b.reach[i] = ease(b.reach[i], 0, 6, dt);
+      b.amp[i] = ease(b.amp[i], 0, 10, dt);
       b.z[i] = b.hop[i];
-      b.bank[i] *= Math.exp(-dt * 8); b.bend[i] *= Math.exp(-dt * 8);
+      b.bank[i] = 0.05 * Math.sin(b.step[i] * 6.2832) * b.stepAmt[i];      // waddle
+      b.bend[i] = ease(b.bend[i], k === WALK ? b.aDir[i] * 0.12 : 0, 6, dt);
       continue;
     }
 
@@ -148,7 +199,8 @@ export function stepBirds(dt) {
       if (near(i) || (pw && Math.hypot(b.lx[i] - pw[0], b.ly[i] - pw[1]) < PR)) { b.mode[i] = TAKEOFF; b.tm[i] = 0.8; }
       if (d < 6 && b.z[i] < 8) {
         b.mode[i] = GROUND; b.x[i] = b.lx[i]; b.y[i] = b.ly[i]; b.vx[i] = b.vy[i] = 0; b.z[i] = 0;
-        b.gt[i] = rand(5, 14); b.aT[i] = rand(0.2, 0.6); b.aK[i] = 0; b.startle[i] = 0;
+        b.gt[i] = rand(5, 14); b.aT[i] = rand(0.25, 0.6); b.aK[i] = STAND; b.act[i] = 0; b.startle[i] = 0;
+        b.impact[i] = 1; b.stance[i] = 1;
         continue;
       }
     } else {
@@ -204,7 +256,7 @@ export function stepBirds(dt) {
   }
 
   // Pose and wingbeat, then the instance matrices.
-  const arr = garden.mesh.instanceMatrix.array, sc = BS, an = garden.anim.array, po = garden.pose.array;
+  const arr = garden.mesh.instanceMatrix.array, sc = BS, an = garden.aAnim.array, po = garden.aPose.array, p2 = garden.aPose2.array, p3 = garden.aPose3.array;
   for (let i = 0; i < N; i++) {
     const mode = b.mode[i];
     if (mode !== GROUND) {
@@ -218,32 +270,40 @@ export function stepBirds(dt) {
       b.bank[i] += (clamp(-turn * 0.35, -0.8, 0.8) + b.gust[i] * 0.12 - b.bank[i]) * Math.min(1, dt * 5);
       b.bend[i] += (clamp(turn * 0.2, -0.55, 0.55) - b.bend[i]) * Math.min(1, dt * 8);
       // The head leads the turn and holds steady against the roll.
-      b.look[i] += (clamp(turn * 0.08, -0.15, 0.15) - b.look[i]) * Math.min(1, dt * 10);
-      b.peck[i] *= Math.exp(-dt * 10);
-      b.tuck[i] += (0 - b.tuck[i]) * Math.min(1, dt * (mode === TAKEOFF ? 14 : 6));
-      const flee = !!near(i);
+      b.look[i] = ease(b.look[i], clamp(turn * 0.08, -0.15, 0.15), 10, dt);
+      const flee = !!near(i), dl = Math.hypot(b.lx[i] - b.x[i], b.ly[i] - b.y[i]);
+      const flare = mode === LAND && dl < BS * 3.5, final = mode === LAND && dl < BS * 4.5;
+      b.tuck[i] = ease(b.tuck[i], 0, mode === TAKEOFF ? 14 : 6, dt);
       let tAmp, rate;
-      if (mode === TAKEOFF) { tAmp = 1.15; rate = 24; }
-      else if (mode === LAND) {
-        const d = Math.hypot(b.lx[i] - b.x[i], b.ly[i] - b.y[i]);
-        const flare = d < BS * 3.5;
-        tAmp = flare ? 1.0 : 0.05; rate = flare ? 21 : 6;
-      } else {
+      if (mode === TAKEOFF) { tAmp = 1.15; rate = 38; }
+      else if (mode === LAND) { tAmp = flare ? 1.0 : 0.07; rate = flare ? 34 : 4; }
+      else {
         const flap = !b.gl[i] || flee;
-        tAmp = flee ? 1.05 : flap ? 0.85 : 0.06; rate = flee ? 23 : flap ? 16 : 16 * b.amp[i];
+        tAmp = flee ? 1.05 : flap ? 0.9 : 0.07; rate = flee ? 38 : flap ? 30 : 4;
       }
-      b.amp[i] += (tAmp - b.amp[i]) * Math.min(1, dt * (tAmp > b.amp[i] ? 7 : 3));
+      b.amp[i] = ease(b.amp[i], tAmp, tAmp > b.amp[i] ? 9 : 4, dt);
       b.ph[i] += dt * b.rate[i] * rate;
+      // Body and tail: level in flight; nose up, tail spread and down, legs out to land.
+      b.pitch[i] = ease(b.pitch[i], flare ? -0.6 : mode === TAKEOFF ? -0.3 : 0.04, 6, dt);
+      b.fan[i] = ease(b.fan[i], clamp(Math.abs(turn) * 0.45 + (flare ? 0.9 : 0) + (mode === TAKEOFF ? 0.4 : 0), 0, 1), 8, dt);
+      b.tail[i] = ease(b.tail[i], flare ? -0.3 : 0.05 * b.amp[i] * Math.cos(b.ph[i]), 10, dt);
+      b.reach[i] = ease(b.reach[i], final ? 1 : 0, final ? 5 : 3, dt);
+      b.stance[i] = ease(b.stance[i], mode === LAND && dl < BS * 0.6 ? 1 : 0, 10, dt);
+      b.nod[i] = ease(b.nod[i], final ? 0.25 : 0, 6, dt);
+      b.stretch[i] = ease(b.stretch[i], final ? 0.1 : 0.3, 4, dt);
+      b.fluff[i] = ease(b.fluff[i], -0.04, 4, dt);
+      b.stepAmt[i] = ease(b.stepAmt[i], 0, 8, dt);
     }
     const a = b.face[i], c = Math.cos(a) * sc, sn = Math.sin(a) * sc, o = i * 16;
     an[i * 4] = b.ph[i]; an[i * 4 + 1] = b.amp[i]; an[i * 4 + 2] = b.bank[i]; an[i * 4 + 3] = b.bend[i];
-    po[i * 3] = b.tuck[i]; po[i * 3 + 1] = b.peck[i]; po[i * 3 + 2] = b.look[i];
+    po[i * 4] = b.tuck[i]; po[i * 4 + 1] = b.nod[i]; po[i * 4 + 2] = b.look[i]; po[i * 4 + 3] = b.pitch[i];
+    p2[i * 4] = b.stance[i]; p2[i * 4 + 1] = b.step[i]; p2[i * 4 + 2] = b.stepAmt[i]; p2[i * 4 + 3] = b.reach[i];
+    p3[i * 4] = b.fan[i]; p3[i * 4 + 1] = b.tail[i]; p3[i * 4 + 2] = b.fluff[i]; p3[i * 4 + 3] = b.stretch[i];
     arr[o] = c; arr[o + 1] = sn; arr[o + 2] = 0; arr[o + 3] = 0;
     arr[o + 4] = -sn; arr[o + 5] = c; arr[o + 6] = 0; arr[o + 7] = 0;
     arr[o + 8] = 0; arr[o + 9] = 0; arr[o + 10] = sc; arr[o + 11] = 0;
     arr[o + 12] = b.x[i]; arr[o + 13] = b.y[i]; arr[o + 14] = b.z[i]; arr[o + 15] = 1;
   }
   garden.mesh.instanceMatrix.needsUpdate = true;
-  garden.anim.needsUpdate = true;
-  garden.pose.needsUpdate = true;
+  for (const k of ["aAnim", "aPose", "aPose2", "aPose3"]) garden[k].needsUpdate = true;
 }
