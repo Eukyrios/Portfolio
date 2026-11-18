@@ -2,6 +2,7 @@
 import "./content.js";
 import "./constants.js";
 import "./shaders/common.js";
+import "./shaders/weather.js";
 import "./shaders/fish.js";
 import "./shaders/surface.js";
 import "./shaders/cell.js";
@@ -26,9 +27,12 @@ import "./garden/sand.js";
 import "./garden/birds.js";
 import "./garden/garden.js";
 import "./theme.js";
+import "./sky.js";
+import "./ui/dials.js";
+import "./weather.js";
 import { state } from "./state.js";
 import { KOI_IDS, SPECIES } from "./constants.js";
-import { camera, cellMat, cellScene, cellT, quadCam, reduce, renderer, screenScene, shadeT, surfaceScene } from "./setup.js";
+import { camera, cellMat, cellScene, cellT, pageScene, pageT, quadCam, reduce, renderer, screenScene, shadeT, surfaceScene } from "./setup.js";
 import { clamp, fish, pick, view } from "./world.js";
 import { addFish, addSpecies } from "./pond/fish.js";
 import { step } from "./pond/swimming.js";
@@ -41,6 +45,8 @@ import { gardenCY } from "./garden/terrain.js";
 import { gScene } from "./garden/scene.js";
 import { stepGarden } from "./garden/garden.js";
 import { updateTheme } from "./theme.js";
+import { updateSky } from "./sky.js";
+import { stepWeather } from "./weather.js";
 
 /* ---------------- loop ---------------- */
 function populate() {
@@ -78,6 +84,8 @@ async function start() {
     last = now; state.clock += dt;
     step(dt);
     stepGarden(dt);
+    stepWeather(dt);
+    updateSky(dt);
     updateCamera(dt);
     updateHover();
     if (hovered) tag.hidden = true; else updateTag();
@@ -100,6 +108,7 @@ async function start() {
     renderer.clearDepth();                         // the garden, and the birds over everything
     renderer.render(gScene, camera);
     renderer.setRenderTarget(cellT); renderer.render(cellScene, quadCam);
+    renderer.setRenderTarget(pageT); renderer.render(pageScene, quadCam);
     renderer.setRenderTarget(null); renderer.render(screenScene, quadCam);
   };
   requestAnimationFrame(frame);

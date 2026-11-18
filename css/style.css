@@ -82,7 +82,7 @@ button:focus-visible, select:focus-visible { outline: 1px solid var(--accent); o
 .bl b { color: var(--ink); font-weight: 400; }
 /* The project panel is drawn in characters, like the pond. */
 .panel {
-  position: fixed; top: 56px; right: 16px; max-height: calc(100% - 120px); overflow: auto; margin: 0;
+  position: fixed; top: 136px; right: 16px; max-height: calc(100% - 136px - 190px); overflow: auto; margin: 0;   /* clear of the minimap below */
   background: color-mix(in srgb, var(--page) 92%, transparent); backdrop-filter: blur(4px);
 }
 .panel[hidden] { display: none; }
@@ -97,6 +97,50 @@ a.btn { font: inherit; color: var(--page); background: var(--ink); border: 1px s
 a.btn:hover { background: var(--ink-hi); }
 a.btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 a.btn[hidden] { display: none; }
+/* The season dial, under the weather buttons. */
+.season { left: 10px; top: 10px; width: 112px; flex-direction: column; align-items: center; gap: 0; padding: 0; pointer-events: auto; outline: none; }
+.dial3d { width: 100px; height: 100px; display: block; cursor: pointer; touch-action: none; border-radius: 50%; box-shadow: 0 0 0 1px var(--line), 0 0 0 4px color-mix(in srgb, var(--page) 70%, transparent); }
+.season:focus-visible .dial3d, .sky:focus-visible .dial3d { outline: 1px dashed var(--accent); outline-offset: 2px; border-radius: 50%; }
+#season-name, #sky-time { width: 112px; text-align: center; box-sizing: border-box; }
+.season svg, .sky svg { display: block; cursor: grab; touch-action: none; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--page) 80%, transparent)); }
+.season .ring { fill: color-mix(in srgb, var(--page) 88%, transparent); stroke: var(--line); stroke-width: 1.5; }
+.season:focus-visible .ring { stroke: var(--accent); }
+.season .divide { stroke: color-mix(in srgb, #000 22%, transparent); stroke-width: 0.6; }
+/* The moving hand: the discs stay still, so their pictures stay upright. */
+.hand line { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.hand circle { fill: var(--accent); stroke: #fff; stroke-width: 1.5; }
+.season .pin, .sky .pin { fill: #fff; stroke: var(--accent); stroke-width: 1.5; }
+.ticks line { stroke: var(--ink-dim); stroke-width: 0.8; }
+.ticks line.major { stroke-width: 1.6; }
+.season, .sky { user-select: none; -webkit-user-select: none; }
+.season svg, .sky svg { cursor: pointer; }
+#season-name { font: 600 11px var(--mono); color: var(--ink); background: color-mix(in srgb, var(--page) 85%, transparent); padding: 0 4px; white-space: nowrap; }
+@media (max-width: 640px) { .season { left: 6px; top: 6px; width: 84px; } .season .dial3d, .sky .dial3d { width: 76px; height: 76px; } #season-name, #sky-time { width: 84px; font-size: 10px; } }
+/* The time-of-day dial: half day, half night; turn it. */
+.sky { right: 10px; top: 10px; width: 112px; flex-direction: column; align-items: center; gap: 0; padding: 0; pointer-events: auto; outline: none; }
+.sky svg { display: block; cursor: grab; touch-action: none; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--page) 80%, transparent)); }
+.sky svg:active { cursor: grabbing; }
+.sky .ring { fill: color-mix(in srgb, var(--page) 88%, transparent); stroke: var(--line); stroke-width: 1.5; }
+.sky:focus-visible .ring { stroke: var(--accent); }
+#sky-time { font: 600 11px var(--mono); color: var(--ink); background: color-mix(in srgb, var(--page) 85%, transparent); padding: 0 4px; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .sky { right: 6px; top: 6px; width: 84px; } }
+/* Weather buttons: bracketed text, like the project panel. */
+.wx {
+  top: 12px; right: 12px; padding: 4px 8px; gap: 2px; pointer-events: auto; flex-wrap: wrap; justify-content: flex-end;
+  background: color-mix(in srgb, var(--page) 88%, transparent); backdrop-filter: blur(4px); border: 1px solid var(--line);
+}
+.wx .lbl { color: var(--ink-dim); margin-right: 4px; }
+.wx button { font: 600 12px/1.4 var(--mono); letter-spacing: 0; color: var(--ink); background: none; border: 0; padding: 1px 3px; cursor: pointer; white-space: pre; }
+.wx button .k { color: var(--ink-dim); }
+.wx button:hover, .wx button:focus-visible { color: var(--page); background: var(--ink); outline: none; }
+.wx button:hover .k, .wx button:focus-visible .k { color: var(--page); }
+.wx button[aria-pressed="true"] { color: var(--page); background: var(--accent); }
+.wx button[aria-pressed="true"] .k { color: var(--page); }
+@media (max-width: 640px) {
+  .wx { top: 8px; right: 8px; left: 8px; justify-content: center; padding: 3px 4px; }
+  .wx .lbl, .wx button .k { display: none; }
+  .wx button { font-size: 11px; padding: 2px 4px; }
+}
 @media (max-width: 640px) {
   .bl .hint, .bl .stats, #minimap { display: none; } .ui { padding: 12px 14px; } #kind { max-width: 110px; }
   .br { flex-direction: column; align-items: flex-end; gap: 6px; }

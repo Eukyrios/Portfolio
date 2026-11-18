@@ -3,7 +3,7 @@
   var shown = false;
   window.pondFail = function (msg) {
     if (shown) return; shown = true;
-    var d = document.createElement("div"); d.className = "nogl"; d.style.zIndex = 9; d.style.padding = "24px"; d.style.textAlign = "center";
+    var d = document.createElement("div"); d.className = "nogl"; d.style.zIndex = 9; d.style.pointerEvents = "none"; d.style.padding = "24px"; d.style.textAlign = "center";
     d.textContent = msg; document.body.appendChild(d);
   };
   window.addEventListener("error", function (e) { window.pondFail("The pond hit an error: " + (e.message || e.type) + ". Reload to try again."); });

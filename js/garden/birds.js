@@ -5,6 +5,8 @@ import { pointer } from "../pond/swimming.js";
 import { gardenCY, shoreY } from "./terrain.js";
 import { BIRD_FRAG, BIRD_VERT } from "../shaders/bird.js";
 import { BIRD_GEO, garden } from "./scene.js";
+import { sky } from "../sky.js";
+import { weather, windVec } from "../weather.js";
 
 /* ---------------- starlings ---------------- */
 // Each starling is in one of four modes: flying with the flock, coming down to
@@ -69,7 +71,11 @@ export function stepBirds(dt) {
   // Only birds in the air flock together.
   for (let i = 0; i < N; i++) if (b.mode[i] === FLY || b.mode[i] === TAKEOFF) { const c = gxOf(b.x[i]) + gyOf(b.y[i]) * GWc; b.next[i] = b.head[c]; b.head[c] = i; }
   // A wandering point the flock swirls around, mostly over the garden.
-  const axp = Math.sin(t * 0.11) * GW * 0.3 + Math.sin(t * 0.27 + 1) * GW * 0.08, ayp = GCY + Math.sin(t * 0.17 + 2) * GH * 0.25;
+  let axp = Math.sin(t * 0.11) * GW * 0.3 + Math.sin(t * 0.27 + 1) * GW * 0.08, ayp = GCY + Math.sin(t * 0.17 + 2) * GH * 0.25;
+  // In a storm the flock leaves for shelter, far to the north; it comes back after.
+  const leave = weather.storm > 0.55 || sky.night > 0.6;   // gone for shelter in a storm, to roost at night
+  if (leave) { axp = 0; ayp = GCY + GH * 3; }
+  const wv = windVec();
   const pw = pointer.inside ? toWorld(pointer.x, pointer.y) : null;
   const RN = BS * 9, R2 = RN * RN, S = BS * 4.2, PR = 130 + BS * 4;
   let grounded = 0;
@@ -90,7 +96,7 @@ export function stepBirds(dt) {
       b.gt[i] -= dt;
       if (b.startle[i] > 0 && (b.startle[i] -= dt) <= 0) { takeOff(i, x - (pw ? pw[0] : x - Math.cos(b.face[i])), y - (pw ? pw[1] : y - Math.sin(b.face[i]))); continue; }
       if (near(i)) { takeOff(i, x - pw[0], y - pw[1]); continue; }
-      if (b.gt[i] <= 0) { takeOff(i); continue; }
+      if (b.gt[i] <= 0 || (leave && Math.random() < dt * 1.5)) { takeOff(i); continue; }
       // Small actions, one at a time: walk a few steps, turn, peck, look about, flick the wings.
       b.aT[i] -= dt;
       if (b.aT[i] <= 0) {
@@ -162,7 +168,8 @@ export function stepBirds(dt) {
       const dxa = axp - x, dya = ayp - y, da = Math.hypot(dxa, dya) || 1;
       fx += ((dxa / da) * 70 - (dya / da) * 40) * 2; fy += ((dya / da) * 70 + (dxa / da) * 40) * 2;
       if (Math.abs(x) > GW * 0.5) fx -= Math.sign(x) * 520;
-      if (Math.abs(y - GCY) > GH * 0.3) fy -= Math.sign(y - GCY) * 700;
+      if (!leave && Math.abs(y - GCY) > GH * 0.3) fy -= Math.sign(y - GCY) * 700;
+      fx += wv[0] * weather.windNow * 240; fy += wv[1] * weather.windNow * 240;   // blown by the wind
       if (mode === TAKEOFF) {
         b.z[i] += (240 - b.z[i]) * Math.min(1, dt * 1.6);
         b.tm[i] -= dt;
@@ -170,7 +177,7 @@ export function stepBirds(dt) {
       } else {
         b.z[i] += ((210 + 90 * Math.sin(t * 0.3 + x * 0.004)) - b.z[i]) * dt * 0.5;
         // Now and then a bird peels off to feed on the sand.
-        if (!near(i) && grounded < N * 0.4 && Math.random() < dt * 0.08) {
+        if (!near(i) && !leave && grounded < N * 0.4 && Math.random() < dt * 0.08 * (1 - 0.8 * weather.rain) * (1 + weather.cover)) {
           const spot = landingSpot(b, i, pw, PR);
           if (spot) { b.mode[i] = LAND; b.lx[i] = spot[0]; b.ly[i] = spot[1]; grounded++; }
         }

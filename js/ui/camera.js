@@ -6,6 +6,8 @@ import { hovered, projects } from "../projects.js";
 import { gardenTop, shoreY } from "../garden/terrain.js";
 import { garden } from "../garden/scene.js";
 import { updateTheme } from "../theme.js";
+import { sky } from "../sky.js";
+import { WEATHER_KEYS, setWeather } from "../weather.js";
 
 /* ---------------- camera: WASD / arrows, joystick, minimap ---------------- */
 const keys = { w: false, a: false, s: false, d: false, shift: false };
@@ -32,6 +34,7 @@ addEventListener("keydown", (e) => {
     zoomAt(view.W / 2, view.H / 2, view.zoom * (e.key === "-" || e.key === "_" ? 1 / 1.2 : 1.2));
     return;
   }
+  if (/^Digit[1-6]$/.test(e.code)) { setWeather(WEATHER_KEYS[+e.code.slice(5) - 1]); return; }   // 1-6: pick the weather
   const k = KEYMAP[e.code];
   if (!k) return;
   e.preventDefault();
@@ -108,8 +111,8 @@ function applyCamera() {
   u.uZoom.value = z;
   u.uCam.value.set(view.cx + view.panX, view.cy + view.panY);
   u.uAxis.value.set(view.W / 2 + view.cx, view.H / 2 - view.cy);
-  u.uShadow.value.set((-26 * z) / view.cw, (22 * z) / view.ch);
-  u.uShadowRock.value.set((-7 * z) / view.cw, (6 * z) / view.ch);
+  u.uShadow.value.set((sky.shadow[0] * 34 * z) / view.cw, (sky.shadow[1] * 34 * z) / view.ch);
+  u.uShadowRock.value.set((sky.shadow[0] * 9 * z) / view.cw, (sky.shadow[1] * 9 * z) / view.ch);
 }
 /** Zoom so the world point under screen point (sx, sy) stays put. */
 export function zoomAt(sx, sy, z, world = toWorld(sx, sy)) {

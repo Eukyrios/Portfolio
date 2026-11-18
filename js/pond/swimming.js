@@ -5,6 +5,7 @@ import { $, clamp, fish, food, halfH, halfW, project, rand, ripple, splash, wrap
 import { removeFood, updateDrops, updateFood, updatePads } from "./food.js";
 import { updateProjects } from "../projects.js";
 import { shoreY } from "../garden/terrain.js";
+import { weather } from "../weather.js";
 
 /* ---------------- swimming ---------------- */
 export const pointer = { x: 0, y: 0, vx: 0, vy: 0, t: 0, lastRipple: 0, inside: false };
@@ -76,7 +77,7 @@ function steer(f, dt) {
   // Wandering from slow overlapping sine waves: smooth, never jittery.
   const wander = 0.65 * Math.sin(state.clock * f.wf[0] + f.wp[0]) + 0.35 * Math.sin(state.clock * f.wf[1] + f.wp[1]);
   let ax = Math.cos(h + wander * 0.8), ay = Math.sin(h + wander * 0.8);
-  let want = f.cruise, mode = "cruise";
+  let want = f.cruise * (1 - 0.35 * weather.ice), mode = "cruise";   // sluggish in the cold
 
   // Edges: look ahead along the heading and turn for open water, always on
   // the same side until clear (no dithering when meeting a wall head-on).
@@ -150,7 +151,10 @@ function steer(f, dt) {
     mode = "chase";
     want = d < L * 0.45 ? L * sp.chase * 0.75 : L * sp.chase * clamp(d / (L * 1.4), 0.35, 1);
     f.zTarget = bd < L * 2.5 ? -4 : -30;
-  } else if (Math.random() < dt * 0.07) f.zTarget = -rand(30, MAX_DEPTH);
+  } else if (Math.random() < dt * 0.07) {
+    // Rain brings them up to the surface; a storm sends them down.
+    f.zTarget = -rand(30 + 90 * weather.storm, MAX_DEPTH) * (1 - 0.5 * weather.rain * (1 - weather.storm));
+  }
 
   if (!best && state.openProj && sp.geo !== "orfe") {          // curious koi gather under the open project
     const dx = state.openProj.x - f.x, dy = state.openProj.y - f.y, d = Math.hypot(dx, dy) || 1;

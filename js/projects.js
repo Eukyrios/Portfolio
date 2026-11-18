@@ -7,6 +7,7 @@ import { clamp, fish, pads, project, rand, ripple, rippleFront, view } from "./w
 import { pointer } from "./pond/swimming.js";
 import { cam } from "./ui/camera.js";
 import { gardenCY, overSandAt } from "./garden/terrain.js";
+import { WEATHERS, weather } from "./weather.js";
 
 /* ---------------- floating projects ---------------- */
 const TEXT_BASE = ATLAS.length;                       // printable ASCII follows the pond glyphs in the atlas
@@ -222,6 +223,7 @@ function drawAbout() {
   const rows = lines.length + 4;
   const c0 = Math.round(sx / view.cw) - Math.floor((inner + 2) / 2), r0 = Math.round(sy / view.ch) - Math.floor(rows / 2);
   if (r0 > view.rows || r0 + rows < 0 || c0 > view.cols || c0 + inner + 2 < 0) return;
+  for (let r = Math.max(0, r0); r < Math.min(view.rows, r0 + rows); r++) for (let c = Math.max(0, c0); c < Math.min(view.cols, c0 + inner + 2); c++) textData[((view.rows - 1 - r) * view.cols + c) * 4 + 2] = 255;
   const head = `[ ${ABOUT_TITLE} ]`;
   putText(c0, r0, "+-", TEXT_DIM, -9); putText(c0 + 2, r0, head, TEXT_ACCENT, state.aboutDecodeT);
   putText(c0 + 2 + head.length, r0, "-".repeat(inner - head.length - 1) + "+", TEXT_DIM, -9);
@@ -267,6 +269,10 @@ export function drawLabels() {
       putText(c0 + 4, r0 + 2, hint, TEXT_DIM, p.decodeT);
     }
     p.label = { c0, c1: c0 + len, r0, r1: r0 + (active ? 3 : 1) };
+  }
+  if (state.clock - weather.announceT < 6) {
+    const msg = `~ ${WEATHERS[weather.kind].name} ~`;
+    putText(Math.round(view.cols / 2 - msg.length / 2), 2, msg, TEXT_DIM, weather.announceT);
   }
   drawAbout();
   textTex.needsUpdate = true;

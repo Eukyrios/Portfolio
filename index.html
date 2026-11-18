@@ -11,9 +11,17 @@
 </head>
 <body>
 <canvas id="pond" aria-label="A pond of koi drawn in text characters, with projects floating on the water. Use the numbered project buttons to open them."></canvas>
+<div class="ui season" id="season" role="slider" tabindex="0" aria-label="Season" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0.5">
+  <canvas class="dial3d" width="100" height="100" aria-hidden="true"></canvas>
+  <span id="season-name">autumn</span>
+</div>
+<div class="ui sky" id="sky" role="slider" tabindex="0" aria-label="Time of day" aria-valuemin="0" aria-valuemax="24" aria-valuenow="12">
+  <canvas class="dial3d" width="100" height="100" aria-hidden="true"></canvas>
+  <span id="sky-time">12:00</span>
+</div>
 <nav class="ui tr kbd-nav" aria-label="Projects"><span class="dim">projects</span><span id="nav"></span></nav>
+<div class="ui br mm"><canvas id="minimap" aria-label="Map of the whole pond. Click it to move the view there."></canvas></div>
 <div class="ui bl">
-  <canvas id="minimap" aria-label="Map of the whole pond. Click it to move the view there."></canvas>
   <div class="move">
     <div id="keys" class="keys" aria-hidden="true"><span></span><kbd data-k="w">W</kbd><span></span><kbd data-k="a">A</kbd><kbd data-k="s">S</kbd><kbd data-k="d">D</kbd></div>
     <div id="stick" class="stick" aria-hidden="true"><div class="knob"></div></div>

@@ -25,6 +25,8 @@ export const ABOUT = [
   "This garden is the quiet part. Draw in the sand.",
   "",
   "WASD or joystick to move. Scroll or pinch to zoom.",
+  "Weather comes and goes; keys 1-6 call it up.",
+  "The dials turn the hours and seasons; drag them.",
 ];
 export const PROJECTS = [
   {

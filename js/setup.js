@@ -3,7 +3,7 @@ import { ATLAS, DRIFT, NR, PALETTE } from "./constants.js";
 import { LIGHT } from "./shaders/common.js";
 import { SOLID_FRAG, SOLID_VERT } from "./shaders/surface.js";
 import { CELL_FRAG, QUAD_VERT } from "./shaders/cell.js";
-import { SCREEN_FRAG } from "./shaders/screen.js";
+import { PAGE_FRAG, SCREEN_FRAG } from "./shaders/screen.js";
 import { padGeometry, petalGeometry } from "./geometry.js";
 
 /* ---------------- setup ---------------- */
@@ -30,6 +30,7 @@ export const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const nearest = { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false };
 export const shadeT = new THREE.WebGLRenderTarget(2, 2, { ...nearest, depthBuffer: true });
 export const cellT = new THREE.WebGLRenderTarget(1, 1, { ...nearest, depthBuffer: false });
+export const pageT = new THREE.WebGLRenderTarget(1, 1, { ...nearest, depthBuffer: false });
 
 export const ripples = Array.from({ length: NR }, () => new THREE.Vector4(0, 0, -99, 0));   // world x, y, start, strength
 export const ripplesU = Array.from({ length: NR }, () => new THREE.Vector4(0, 0, -99, 0));  // the same, on screen, for the shader
@@ -46,21 +47,29 @@ export const cellMat = new THREE.ShaderMaterial({
     uHeightMap: { value: null }, uGarden: { value: new THREE.Vector4(1e6, 0, 1, 1) }, uHalf: { value: new THREE.Vector2() },
     uZoom: { value: 1 }, uCam: { value: new THREE.Vector2() }, uAxis: { value: new THREE.Vector2() },
     uSpacing: { value: 39 }, uShadowRock: { value: new THREE.Vector2() }, uShadowBird: { value: new THREE.Vector2() }, uGlow: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 1, 0)) },
+    uWx: { value: new THREE.Vector4() }, uWy: { value: new THREE.Vector4() }, uWz: { value: new THREE.Vector4() }, uCloudOff: { value: new THREE.Vector2() },
+    uWm: { value: new THREE.Vector4(0, 1000, -99, 0) }, uBolt: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) },
+    uWo: { value: new THREE.Vector4() }, uWo2: { value: new THREE.Vector2() }, uSky: { value: new THREE.Vector4(1, 1, 1, 0) },
+    uSun: { value: new THREE.Vector4(1, 0, 0, 0) }, uMoon: { value: new THREE.Vector4() }, uLantern: { value: new THREE.Vector4(1e6, 0, 1e6, 0) }, uSeason: { value: new THREE.Vector4(0, 0, 1, 0) },
   },
 });
 export const screenMat = new THREE.ShaderMaterial({
   vertexShader: QUAD_VERT, fragmentShader: SCREEN_FRAG, blending: THREE.NoBlending, depthTest: false, depthWrite: false,
   uniforms: {
-    uCells: { value: cellT.texture }, uAtlas: { value: null }, uCellDev: { value: new THREE.Vector2() },
+    uCells: { value: cellT.texture }, uPageT: { value: pageT.texture }, uText: cellMat.uniforms.uText, uAtlas: { value: null }, uCellDev: { value: new THREE.Vector2() },
     uGrid: { value: new THREE.Vector2() }, uHeight: { value: 0 }, uGlyphs: { value: ATLAS.length + 95 + 8 },
     uPage: { value: new THREE.Vector3(0.027, 0.078, 0.09) }, uPageShadow: { value: new THREE.Vector3(0.016, 0.05, 0.058) },
     uSand: { value: new THREE.Vector3(0.906, 0.867, 0.80) }, uSandShadow: { value: new THREE.Vector3(0.80, 0.75, 0.67) },
     uZoom: cellMat.uniforms.uZoom, uCam: { value: cellMat.uniforms.uCam.value }, uAxis: { value: cellMat.uniforms.uAxis.value },
     uCellCss: { value: cellMat.uniforms.uCellCss.value }, uGarden: { value: new THREE.Vector4(1e6, 0, 1, 1) },
+    uTime: cellMat.uniforms.uTime, uWx: cellMat.uniforms.uWx, uWy: cellMat.uniforms.uWy, uWz: cellMat.uniforms.uWz, uCloudOff: cellMat.uniforms.uCloudOff,
+    uWm: cellMat.uniforms.uWm, uBolt: cellMat.uniforms.uBolt, uWo: cellMat.uniforms.uWo, uWo2: cellMat.uniforms.uWo2,
+    uSky: cellMat.uniforms.uSky, uSun: cellMat.uniforms.uSun, uMoon: cellMat.uniforms.uMoon, uLantern: cellMat.uniforms.uLantern, uSeason: cellMat.uniforms.uSeason,
   },
 });
 const quad = (mat) => { const s = new THREE.Scene(); const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); m.frustumCulled = false; s.add(m); return s; };
-export const cellScene = quad(cellMat), screenScene = quad(screenMat);
+const pageMat = new THREE.ShaderMaterial({ vertexShader: QUAD_VERT, fragmentShader: PAGE_FRAG, blending: THREE.NoBlending, depthTest: false, depthWrite: false, uniforms: screenMat.uniforms });
+export const cellScene = quad(cellMat), pageScene = quad(pageMat), screenScene = quad(screenMat);
 
 export const PAD_GEO = padGeometry();
 export const PETAL_OUT = petalGeometry(8, 1, 0.5, 0), PETAL_IN = petalGeometry(7, 0.75, 0.95, 0.4);

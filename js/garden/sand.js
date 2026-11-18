@@ -6,7 +6,7 @@ import { gardenTop, shoreY } from "./terrain.js";
 import { garden } from "./scene.js";
 
 /** The untouched pattern: straight lines, rings around each island. */
-const flowByte = (a) => 1 + Math.round(((((a % Math.PI) + Math.PI) % Math.PI) / Math.PI) * 254) % 255;
+export const flowByte = (a) => 1 + Math.round(((((a % Math.PI) + Math.PI) % Math.PI) / Math.PI) * 254) % 255;
 export function buildSand() {
   const t = garden.texel, GT = gardenTop();
   const hw = (garden.hw = Math.ceil((view.WX + 80) / t)), hh = (garden.hh = Math.ceil((view.GH + 80) / t));

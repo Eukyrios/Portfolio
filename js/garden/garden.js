@@ -9,7 +9,6 @@ import { initBirds, stepBirds } from "./birds.js";
 function layoutGarden() {
   const u = cellMat.uniforms;
   u.uSpacing.value = garden.spacing;
-  u.uShadowRock.value.set(-7 / view.cw, 6 / view.ch);
   u.uShadowBird.value.set(-60 / view.cw, 46 / view.ch);
 }
 

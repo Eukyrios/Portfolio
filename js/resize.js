@@ -1,6 +1,6 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js";
 import { ATLAS, FONT } from "./constants.js";
-import { camera, cellMat, cellT, renderer, screenMat, shadeT } from "./setup.js";
+import { camera, cellMat, cellT, pageT, renderer, screenMat, shadeT } from "./setup.js";
 import { clamp, fish, halfH, halfW, view } from "./world.js";
 import { placePads } from "./pond/pads.js";
 import { allocText, layoutProjects } from "./projects.js";
@@ -40,6 +40,7 @@ export function resize() {
   renderer.setSize(W, H, false);
   shadeT.setSize(view.cols * 2, view.rows * 2);
   cellT.setSize(view.cols, view.rows);
+  pageT.setSize(view.cols, view.rows);
   const gridW = view.cols * cw, gridH = view.rows * ch;
   view.camZ = gridH / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   view.cx = gridW / 2 - W / 2; view.cy = H / 2 - gridH / 2;
