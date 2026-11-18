@@ -101,7 +101,14 @@ a.btn[hidden] { display: none; }
 .season { left: 10px; top: 10px; width: 112px; flex-direction: column; align-items: center; gap: 0; padding: 0; pointer-events: auto; outline: none; }
 .dial3d { width: 100px; height: 100px; display: block; cursor: pointer; touch-action: none; border-radius: 50%; box-shadow: 0 0 0 1px var(--line), 0 0 0 4px color-mix(in srgb, var(--page) 70%, transparent); }
 .season:focus-visible .dial3d, .sky:focus-visible .dial3d { outline: 1px dashed var(--accent); outline-offset: 2px; border-radius: 50%; }
-#season-name, #sky-time { width: 112px; text-align: center; box-sizing: border-box; }
+/* The dials' labels, set like the project card: bracketed text on the card's glass. */
+#season-name, #sky-time {
+  margin-top: 6px; padding: 1px 6px; text-align: center; white-space: pre;
+  font: 600 13px/1.4 var(--mono); letter-spacing: 0; color: var(--ink-hi); font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--page) 92%, transparent); backdrop-filter: blur(4px);
+}
+#season-name::before, #sky-time::before { content: "[ "; color: var(--ink-dim); }
+#season-name::after, #sky-time::after { content: " ]"; color: var(--ink-dim); }
 .season svg, .sky svg { display: block; cursor: grab; touch-action: none; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--page) 80%, transparent)); }
 .season .ring { fill: color-mix(in srgb, var(--page) 88%, transparent); stroke: var(--line); stroke-width: 1.5; }
 .season:focus-visible .ring { stroke: var(--accent); }
@@ -114,15 +121,13 @@ a.btn[hidden] { display: none; }
 .ticks line.major { stroke-width: 1.6; }
 .season, .sky { user-select: none; -webkit-user-select: none; }
 .season svg, .sky svg { cursor: pointer; }
-#season-name { font: 600 11px var(--mono); color: var(--ink); background: color-mix(in srgb, var(--page) 85%, transparent); padding: 0 4px; white-space: nowrap; }
-@media (max-width: 640px) { .season { left: 6px; top: 6px; width: 84px; } .season .dial3d, .sky .dial3d { width: 76px; height: 76px; } #season-name, #sky-time { width: 84px; font-size: 10px; } }
+@media (max-width: 640px) { .season { left: 6px; top: 6px; width: 84px; } .season .dial3d, .sky .dial3d { width: 76px; height: 76px; } #season-name, #sky-time { font-size: 11px; padding: 1px 4px; } }
 /* The time-of-day dial: half day, half night; turn it. */
 .sky { right: 10px; top: 10px; width: 112px; flex-direction: column; align-items: center; gap: 0; padding: 0; pointer-events: auto; outline: none; }
 .sky svg { display: block; cursor: grab; touch-action: none; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--page) 80%, transparent)); }
 .sky svg:active { cursor: grabbing; }
 .sky .ring { fill: color-mix(in srgb, var(--page) 88%, transparent); stroke: var(--line); stroke-width: 1.5; }
 .sky:focus-visible .ring { stroke: var(--accent); }
-#sky-time { font: 600 11px var(--mono); color: var(--ink); background: color-mix(in srgb, var(--page) 85%, transparent); padding: 0 4px; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .sky { right: 6px; top: 6px; width: 84px; } }
 /* Weather buttons: bracketed text, like the project panel. */
 .wx {
